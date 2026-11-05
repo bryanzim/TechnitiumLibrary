@@ -23,6 +23,7 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using TechnitiumLibrary.Net.Dns;
 
 namespace TechnitiumLibrary.Net.Proxy
 {
@@ -33,6 +34,8 @@ namespace TechnitiumLibrary.Net.Proxy
         readonly Socket _controlSocket;
         readonly Socket _udpSocket;
         EndPoint _relayEP;
+        bool _acceptAnyRelayPort;
+        EndPoint _lastRemoteEndPoint;
 
         #endregion
 
@@ -43,9 +46,7 @@ namespace TechnitiumLibrary.Net.Proxy
             _controlSocket = controlSocket;
             _udpSocket = udpSocket;
             _relayEP = relayEP;
-
-            if (_relayEP.GetPort() == 0)
-                _relayEP = null; //no relay ep provided
+            _acceptAnyRelayPort = relayEP.GetPort() == 0;
 
             _ = ReadControlSocketAsync();
         }
@@ -123,7 +124,7 @@ namespace TechnitiumLibrary.Net.Proxy
 
         public Task<int> SendToAsync(ArraySegment<byte> buffer, EndPoint remoteEP, CancellationToken cancellationToken = default)
         {
-            if (_relayEP == null)
+            if ((_relayEP == null) || _acceptAnyRelayPort)
                 return Task.FromResult(0); //relay ep not known yet
 
             //get type, address bytes & port bytes
@@ -189,9 +190,50 @@ namespace TechnitiumLibrary.Net.Proxy
         {
             byte[] datagram = new byte[262 + buffer.Count];
 
+            while (true)
+            {
             SocketReceiveFromResult result = await _udpSocket.ReceiveFromAsync(datagram, SocketFlags.None, SocketExtensions.GetEndPointAnyFor(_udpSocket.AddressFamily), cancellationToken);
 
-            if (result.ReceivedBytes < 10)
+            if (!IsFromRelay(result.RemoteEndPoint))
+            {
+                if (_acceptAnyRelayPort && (_relayEP is IPEndPoint expectedRelay) && (expectedRelay.Address.Equals(IPAddress.Any) || expectedRelay.Address.Equals(IPAddress.IPv6Any)))
+                    throw new SocksProxyException("SOCKS UDP relay endpoint is not known.");
+
+                continue;
+            }
+
+            if ((result.ReceivedBytes < 4) || (datagram[2] != 0))
+            {
+                if (result.ReceivedBytes < 4)
+                    throw new SocksProxyException("Incomplete SOCKS5 datagram was received.");
+
+                continue; //FRAG must be 0; fragmented datagrams are not reassembled
+            }
+
+            int headerLength;
+
+            switch ((SocksAddressType)datagram[3])
+            {
+                case SocksAddressType.IPv4Address:
+                    headerLength = 10;
+                    break;
+
+                case SocksAddressType.IPv6Address:
+                    headerLength = 22;
+                    break;
+
+                case SocksAddressType.DomainName:
+                    if (result.ReceivedBytes < 5)
+                        throw new SocksProxyException("Incomplete SOCKS5 datagram was received.");
+
+                    headerLength = 7 + datagram[4];
+                    break;
+
+                default:
+                    throw new NotSupportedException("SocksAddressType not supported.");
+            }
+
+            if (result.ReceivedBytes < headerLength)
                 throw new SocksProxyException("Incomplete SOCKS5 datagram was received.");
 
             EndPoint remoteEP;
@@ -266,16 +308,49 @@ namespace TechnitiumLibrary.Net.Proxy
             int dataOffset = 6 + addressSize;
             int dataSize = result.ReceivedBytes - dataOffset;
 
+            if (dataSize < 0)
+                throw new SocksProxyException("Incomplete SOCKS5 datagram was received.");
+
             if (dataSize > buffer.Count)
                 dataSize = buffer.Count;
 
             ArraySegment<byte> recvData = new ArraySegment<byte>(datagram, dataOffset, dataSize);
             recvData.CopyTo(buffer);
 
-            if (_relayEP == null)
-                _relayEP = result.RemoteEndPoint; //set new relay ep
+            if (_acceptAnyRelayPort)
+            {
+                _relayEP = result.RemoteEndPoint;
+                _acceptAnyRelayPort = false;
+            }
+
+            _lastRemoteEndPoint = remoteEP;
 
             return new SocketReceiveFromResult() { ReceivedBytes = dataSize, RemoteEndPoint = remoteEP };
+            }
+        }
+
+        bool IsFromRelay(EndPoint remoteEP)
+        {
+            if (_relayEP is null)
+                return false;
+
+            if (_acceptAnyRelayPort)
+            {
+                if (_relayEP is IPEndPoint expectedIp)
+                {
+                    if (expectedIp.Address.Equals(IPAddress.Any) || expectedIp.Address.Equals(IPAddress.IPv6Any))
+                        return false;
+
+                    return (remoteEP is IPEndPoint actualIp) && expectedIp.Address.Equals(actualIp.Address);
+                }
+
+                if ((_relayEP is DomainEndPoint expectedDomain) && (remoteEP is DomainEndPoint actualDomain))
+                    return DnsDatagram.EqualsIgnoreCaseAscii(expectedDomain.Address, actualDomain.Address);
+
+                return false;
+            }
+
+            return _relayEP.Equals(remoteEP);
         }
 
         public async Task<int> UdpQueryAsync(ArraySegment<byte> request, ArraySegment<byte> response, EndPoint remoteEP, int timeout = 10000, int retries = 1, bool expBackoffTimeout = false, Func<int, bool> isResponseValid = null, CancellationToken cancellationToken = default)
@@ -301,7 +376,7 @@ namespace TechnitiumLibrary.Net.Proxy
             while (retry < retries) //retry loop
             {
                 if (expBackoffTimeout)
-                    timeoutValue = timeout * (2 ^ retry);
+                    timeoutValue = timeout * (1 << retry);
 
                 retry++;
 
@@ -335,6 +410,9 @@ namespace TechnitiumLibrary.Net.Proxy
 
         public EndPoint ProxyUdpRelayEndPoint
         { get { return _relayEP; } }
+
+        public EndPoint LastRemoteEndPoint
+        { get { return _lastRemoteEndPoint; } }
 
         #endregion
     }

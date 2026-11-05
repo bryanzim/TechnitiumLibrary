@@ -172,7 +172,7 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
 
                 DnsNSECRecordData nsec = nsecRecord.RDATA as DnsNSECRecordData;
 
-                if (nsecRecord.Name.Equals(domain, StringComparison.OrdinalIgnoreCase))
+                if (DnsDatagram.EqualsIgnoreCaseAscii(nsecRecord.Name, domain))
                 {
                     //found proof of existence
 
@@ -186,7 +186,7 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
                 {
                     //found proof of cover
 
-                    if (nsec._nextDomainName.EndsWith("." + domain, StringComparison.OrdinalIgnoreCase))
+                    if (DnsDatagram.EndsWithIgnoreCaseAscii(nsec._nextDomainName, "." + domain))
                         return DnssecProofOfNonExistence.NoData; //domain is empty non-terminal (ENT) so proves NO DATA
 
                     if (wildcardAnswerValidation)
@@ -211,7 +211,7 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
 
                 DnsNSECRecordData nsec = nsecRecord.RDATA as DnsNSECRecordData;
 
-                if (nsecRecord.Name.Equals(wildcardDomain, StringComparison.OrdinalIgnoreCase))
+                if (DnsDatagram.EqualsIgnoreCaseAscii(nsecRecord.Name, wildcardDomain))
                 {
                     //found proof of existence for a wildcard domain
 
@@ -226,7 +226,7 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
                 {
                     //found proof of cover for wildcard domain
 
-                    if (nsec._nextDomainName.EndsWith("." + wildcardDomain, StringComparison.OrdinalIgnoreCase))
+                    if (DnsDatagram.EndsWithIgnoreCaseAscii(nsec._nextDomainName, "." + wildcardDomain))
                         return DnssecProofOfNonExistence.NoData; //wildcard domain is empty non-terminal (ENT) so proves NO DATA
 
                     //proved that the actual domain does not exists since a wildcard does not exists
@@ -276,7 +276,7 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
                 string label1 = labels1[labels1.Length - 1 - i];
                 string label2 = labels2[labels2.Length - 1 - i];
 
-                if (label1.Equals(label2, StringComparison.OrdinalIgnoreCase))
+                if (DnsDatagram.EqualsIgnoreCaseAscii(label1, label2))
                 {
                     if (wildcard is null)
                         wildcard = label1;
@@ -336,7 +336,9 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
 
         internal static void WriteTypeBitMapsTo(IReadOnlyList<DnsResourceRecordType> types, Stream s)
         {
-            Span<byte> windowBlockSurvey = stackalloc byte[256];
+            // -1 means the window has no types. Zero is a real bit number (for example URI, type 256).
+            Span<short> windowBlockSurvey = stackalloc short[256];
+            windowBlockSurvey.Fill(-1);
 
             foreach (DnsResourceRecordType type in types)
             {
@@ -351,7 +353,7 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
             for (int currentWindowBlockNumber = 0; currentWindowBlockNumber < windowBlockSurvey.Length; currentWindowBlockNumber++)
             {
                 int maxBits = windowBlockSurvey[currentWindowBlockNumber];
-                if (maxBits > 0)
+                if (maxBits >= 0)
                 {
                     int bitmapLength = (int)Math.Ceiling((maxBits + 1) / 8.0);
                     byte[] bitmap = new byte[bitmapLength];
@@ -492,7 +494,7 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
 
             if (obj is DnsNSECRecordData other)
             {
-                if (!_nextDomainName.Equals(other._nextDomainName, StringComparison.OrdinalIgnoreCase))
+                if (!DnsDatagram.EqualsIgnoreCaseAscii(_nextDomainName, other._nextDomainName))
                     return false;
 
                 if (_types.Count != other._types.Count)
@@ -512,7 +514,13 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
 
         public override int GetHashCode()
         {
-            return HashCode.Combine(_nextDomainName, _types);
+            HashCode hash = new HashCode();
+            hash.Add(DnsDatagram.GetHashCodeIgnoreCaseAscii(_nextDomainName));
+
+            foreach (DnsResourceRecordType type in _types)
+                hash.Add(type);
+
+            return hash.ToHashCode();
         }
 
         public override void SerializeTo(Utf8JsonWriter jsonWriter)

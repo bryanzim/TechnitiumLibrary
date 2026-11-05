@@ -25,6 +25,7 @@ using System.Net.Security;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Threading;
 using System.Threading.Tasks;
 using TechnitiumLibrary.Net.Dns;
 using TechnitiumLibrary.Net.Proxy;
@@ -36,6 +37,7 @@ namespace TechnitiumLibrary.Net.Mail
         #region variables
 
         readonly static RemoteCertificateValidationCallback _existingServerCertificateValidationCallback;
+        readonly static AsyncLocal<SmtpClientEx> _sendingClient = new AsyncLocal<SmtpClientEx>();
         static bool _ignoreCertificateErrorsForProxy;
 
         readonly static FieldInfo _localHostName = typeof(SmtpClient).GetField("_clientDomain", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -43,10 +45,13 @@ namespace TechnitiumLibrary.Net.Mail
         NetProxy _proxy;
         bool _smtpOverTls;
         string _host;
-        int _port;
+        int _port = 25;
         bool _ignoreCertificateErrors;
 
         TunnelProxy _tunnelProxy;
+        bool _tunnelUsesSsl;
+        bool _tunnelIgnoresCertificateErrors;
+        NetProxy _tunnelProxyOwner;
 
         #endregion
 
@@ -104,10 +109,16 @@ namespace TechnitiumLibrary.Net.Mail
 
         private static bool ServerCertificateValidationCallback(object sender, X509Certificate certificate, X509Chain chain, SslPolicyErrors sslPolicyErrors)
         {
-            if (sender is SmtpClientEx smtpClient)
+            SmtpClientEx smtpClient = _sendingClient.Value;
+            if (smtpClient is null)
+                smtpClient = sender as SmtpClientEx;
+
+            if (smtpClient is not null)
             {
                 if (smtpClient._ignoreCertificateErrors)
                     return true;
+
+                bool currentTunnel = IsCurrentSmtpTunnel(smtpClient, sender);
 
                 switch (sslPolicyErrors)
                 {
@@ -115,26 +126,10 @@ namespace TechnitiumLibrary.Net.Mail
                         return true;
 
                     case SslPolicyErrors.RemoteCertificateNameMismatch:
-                        return smtpClient._proxy != null; //trusting name mismatch when proxy is set
+                        return currentTunnel;
 
                     default:
-                        return false;
-                }
-            }
-
-            if (sender is SslStream sslStream && IPAddress.TryParse(sslStream.TargetHostName, out IPAddress address) && IPAddress.IsLoopback(address))
-            {
-                if (_ignoreCertificateErrorsForProxy)
-                    return true;
-
-                switch (sslPolicyErrors)
-                {
-                    case SslPolicyErrors.None:
-                    case SslPolicyErrors.RemoteCertificateNameMismatch: //trusting name mismatch for loopback tunnel proxy
-                        return true;
-
-                    default:
-                        return false;
+                        return _ignoreCertificateErrorsForProxy && currentTunnel;
                 }
             }
 
@@ -142,6 +137,17 @@ namespace TechnitiumLibrary.Net.Mail
                 return _existingServerCertificateValidationCallback(sender, certificate, chain, sslPolicyErrors);
 
             return sslPolicyErrors == SslPolicyErrors.None;
+        }
+
+        static bool IsCurrentSmtpTunnel(SmtpClientEx smtpClient, object sender)
+        {
+            if ((smtpClient._tunnelProxy is null) || (sender is not SslStream sslStream))
+                return false;
+
+            if (!IPAddress.TryParse(sslStream.TargetHostName, out IPAddress address))
+                return false;
+
+            return address.Equals(smtpClient._tunnelProxy.TunnelEndPoint.Address);
         }
 
         #endregion
@@ -176,82 +182,208 @@ namespace TechnitiumLibrary.Net.Mail
             throw new NotSupportedException();
         }
 
+        sealed class RecipientGroup
+        {
+            public readonly List<MailAddress> To = new List<MailAddress>();
+            public readonly List<MailAddress> Cc = new List<MailAddress>();
+            public readonly List<MailAddress> Bcc = new List<MailAddress>();
+        }
+
         public new async Task SendMailAsync(MailMessage message)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
 
-            if (message.To.Count == 0)
+            SmtpClientEx previous = _sendingClient.Value;
+            _sendingClient.Value = this;
+
+            try
+            {
+                if ((message.To.Count == 0) && (message.CC.Count == 0) && (message.Bcc.Count == 0))
+                    throw new ArgumentException("Message does not contain receipent email address.");
+
+                if (DeliveryMethod != SmtpDeliveryMethod.Network)
+                {
+                    await base.SendMailAsync(message);
+                    return;
+                }
+
+                if (string.IsNullOrEmpty(_host))
+                {
+                    await SendToRecipientDomainsAsync(message);
+                    return;
+                }
+
+                await DeliverAsync(message, _host, _port);
+            }
+            finally
+            {
+                _sendingClient.Value = previous;
+            }
+        }
+
+        async Task SendToRecipientDomainsAsync(MailMessage message)
+        {
+            if (_dnsClient == null)
+                _dnsClient = new DnsClient() { Proxy = _proxy };
+
+            Dictionary<string, RecipientGroup> groups = new Dictionary<string, RecipientGroup>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (MailAddress address in message.To)
+                AddRecipient(groups, address, 0);
+
+            foreach (MailAddress address in message.CC)
+                AddRecipient(groups, address, 1);
+
+            foreach (MailAddress address in message.Bcc)
+                AddRecipient(groups, address, 2);
+
+            MailAddress[] originalTo = new MailAddress[message.To.Count];
+            MailAddress[] originalCc = new MailAddress[message.CC.Count];
+            MailAddress[] originalBcc = new MailAddress[message.Bcc.Count];
+            message.To.CopyTo(originalTo, 0);
+            message.CC.CopyTo(originalCc, 0);
+            message.Bcc.CopyTo(originalBcc, 0);
+
+            ICredentialsByHost savedCredentials = Credentials;
+            Credentials = null;
+
+            try
+            {
+                foreach (KeyValuePair<string, RecipientGroup> item in groups)
+                {
+                    message.To.Clear();
+                    message.CC.Clear();
+                    message.Bcc.Clear();
+
+                    foreach (MailAddress address in item.Value.To)
+                        message.To.Add(address);
+
+                    foreach (MailAddress address in item.Value.Cc)
+                        message.CC.Add(address);
+
+                    foreach (MailAddress address in item.Value.Bcc)
+                        message.Bcc.Add(address);
+
+                    await DeliverToDomainAsync(message, item.Key);
+                }
+            }
+            finally
+            {
+                Credentials = savedCredentials;
+
+                message.To.Clear();
+                message.CC.Clear();
+                message.Bcc.Clear();
+
+                foreach (MailAddress address in originalTo)
+                    message.To.Add(address);
+
+                foreach (MailAddress address in originalCc)
+                    message.CC.Add(address);
+
+                foreach (MailAddress address in originalBcc)
+                    message.Bcc.Add(address);
+            }
+        }
+
+        static void AddRecipient(Dictionary<string, RecipientGroup> groups, MailAddress address, int field)
+        {
+            if ((address is null) || string.IsNullOrEmpty(address.Host))
                 throw new ArgumentException("Message does not contain receipent email address.");
 
-            if (DeliveryMethod == SmtpDeliveryMethod.Network)
+            if (!groups.TryGetValue(address.Host, out RecipientGroup group))
             {
-                string host = _host;
+                group = new RecipientGroup();
+                groups.Add(address.Host, group);
+            }
 
-                if (string.IsNullOrEmpty(host))
+            switch (field)
+            {
+                case 0:
+                    group.To.Add(address);
+                    break;
+
+                case 1:
+                    group.Cc.Add(address);
+                    break;
+
+                default:
+                    group.Bcc.Add(address);
+                    break;
+            }
+        }
+
+        async Task DeliverToDomainAsync(MailMessage message, string domain)
+        {
+            IReadOnlyList<string> mxDomains = await Dns.DnsClient.ResolveMXAsync(_dnsClient, domain);
+            if (mxDomains.Count == 0)
+            {
+                await DeliverAsync(message, domain, 25);
+                return;
+            }
+
+            Exception lastError = null;
+
+            foreach (string mxDomain in mxDomains)
+            {
+                try
                 {
-                    //resolve MX for the receipent domain using IDnsClient
-                    if (_dnsClient == null)
-                        _dnsClient = new DnsClient() { Proxy = _proxy };
-
-                    IReadOnlyList<string> mxDomains = await Dns.DnsClient.ResolveMXAsync(_dnsClient, message.To[0].Host);
-                    if (mxDomains.Count > 0)
-                        host = mxDomains[0];
-                    else
-                        host = message.To[0].Host;
-
-                    _port = 25;
-                    Credentials = null;
+                    await DeliverAsync(message, mxDomain, 25);
+                    return;
                 }
-
-                if (_proxy == null)
+                catch (Exception ex)
                 {
-                    if (_smtpOverTls)
-                    {
-                        EndPoint remoteEP = EndPointExtensions.GetEndPoint(host, _port);
-
-                        if ((_tunnelProxy != null) && !_tunnelProxy.RemoteEndPoint.Equals(remoteEP))
-                        {
-                            _tunnelProxy.Dispose();
-                            _tunnelProxy = null;
-                        }
-
-                        if ((_tunnelProxy == null) || _tunnelProxy.IsBroken)
-                            _tunnelProxy = await TunnelProxy.CreateTunnelProxyAsync(remoteEP, true, _ignoreCertificateErrors);
-
-                        base.Host = _tunnelProxy.TunnelEndPoint.Address.ToString();
-                        base.Port = _tunnelProxy.TunnelEndPoint.Port;
-                    }
-                    else
-                    {
-                        base.Host = host;
-                        base.Port = _port;
-                    }
-
-                    await base.SendMailAsync(message);
+                    lastError = ex;
                 }
-                else
-                {
-                    EndPoint remoteEP = EndPointExtensions.GetEndPoint(host, _port);
+            }
 
-                    if ((_tunnelProxy != null) && !_tunnelProxy.RemoteEndPoint.Equals(remoteEP))
-                    {
-                        _tunnelProxy.Dispose();
-                        _tunnelProxy = null;
-                    }
+            throw lastError;
+        }
 
-                    if ((_tunnelProxy == null) || _tunnelProxy.IsBroken)
-                        _tunnelProxy = await _proxy.CreateTunnelProxyAsync(remoteEP, _smtpOverTls, _ignoreCertificateErrors);
-
-                    base.Host = _tunnelProxy.TunnelEndPoint.Address.ToString();
-                    base.Port = _tunnelProxy.TunnelEndPoint.Port;
-
-                    await base.SendMailAsync(message);
-                }
+        async Task DeliverAsync(MailMessage message, string host, int port)
+        {
+            if ((_proxy == null) && !_smtpOverTls)
+            {
+                base.Host = host;
+                base.Port = port;
             }
             else
             {
-                await base.SendMailAsync(message);
+                await EnsureTunnelAsync(EndPointExtensions.GetEndPoint(host, port), _smtpOverTls, _ignoreCertificateErrors, _proxy);
             }
+
+            await base.SendMailAsync(message);
+        }
+
+        async Task EnsureTunnelAsync(EndPoint remoteEP, bool useSsl, bool ignoreCertificateErrors, NetProxy proxy)
+        {
+            bool sameTunnel = (_tunnelProxy != null)
+                && !_tunnelProxy.IsBroken
+                && _tunnelProxy.RemoteEndPoint.Equals(remoteEP)
+                && (_tunnelUsesSsl == useSsl)
+                && (_tunnelIgnoresCertificateErrors == ignoreCertificateErrors)
+                && ReferenceEquals(_tunnelProxyOwner, proxy);
+
+            if (!sameTunnel)
+            {
+                if (_tunnelProxy != null)
+                {
+                    _tunnelProxy.Dispose();
+                    _tunnelProxy = null;
+                }
+
+                if (proxy == null)
+                    _tunnelProxy = await TunnelProxy.CreateTunnelProxyAsync(remoteEP, useSsl, ignoreCertificateErrors);
+                else
+                    _tunnelProxy = await proxy.CreateTunnelProxyAsync(remoteEP, useSsl, ignoreCertificateErrors);
+
+                _tunnelUsesSsl = useSsl;
+                _tunnelIgnoresCertificateErrors = ignoreCertificateErrors;
+                _tunnelProxyOwner = proxy;
+            }
+
+            base.Host = _tunnelProxy.TunnelEndPoint.Address.ToString();
+            base.Port = _tunnelProxy.TunnelEndPoint.Port;
         }
 
         public new Task SendMailAsync(string from, string recipients, string subject, string body)

@@ -21,6 +21,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
+using System.Threading;
 
 namespace TechnitiumLibrary.Net.Dns.ResourceRecords
 {
@@ -252,7 +253,7 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
 
             foreach (DnsResourceRecord record in records)
             {
-                string recordName = record.Name.ToLowerInvariant();
+                string recordName = DnsDatagram.ToLowerInvariantAscii(record.Name);
 
                 if (!groupedByDomainRecords.TryGetValue(recordName, out Dictionary<DnsResourceRecordType, List<DnsResourceRecord>> groupedByTypeRecords))
                 {
@@ -430,7 +431,7 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
 
         internal void NormalizeName()
         {
-            _name = _name.ToLowerInvariant();
+            _name = DnsDatagram.ToLowerInvariantAscii(_name);
             _rData.NormalizeName();
         }
 
@@ -454,9 +455,9 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
 
             if (string.IsNullOrEmpty(originDomain))
                 value = domain + ".";
-            else if (domain.Equals(originDomain, StringComparison.OrdinalIgnoreCase))
+            else if (DnsDatagram.EqualsIgnoreCaseAscii(domain, originDomain))
                 value = "@";
-            else if (domain.EndsWith("." + originDomain, StringComparison.OrdinalIgnoreCase))
+            else if (DnsDatagram.EndsWithIgnoreCaseAscii(domain, "." + originDomain))
                 value = domain.Substring(0, domain.Length - originDomain.Length - 1);
             else
                 value = domain + ".";
@@ -497,16 +498,16 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
             else if (_ttl > maximumTtl)
                 _ttl = maximumTtl; //to help remove record from cache early
 
-            _setExpiry = true;
-            _wasExpiryReset = false;
             _ttlExpires = DateTime.UtcNow.AddSeconds(_ttl);
             _serveStaleTtlExpires = _ttlExpires.AddSeconds(serveStaleTtl);
             _serveStaleAnswerTtl = serveStaleAnswerTtl;
+            _wasExpiryReset = false;
+            Volatile.Write(ref _setExpiry, true);
         }
 
         public void ResetExpiry(uint seconds)
         {
-            if (!_setExpiry)
+            if (!Volatile.Read(ref _setExpiry))
                 throw new InvalidOperationException("Must call SetExpiry() before ResetExpiry().");
 
             _wasExpiryReset = true;
@@ -515,7 +516,7 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
 
         public void RemoveExpiry()
         {
-            _setExpiry = false;
+            Volatile.Write(ref _setExpiry, false);
         }
 
         public bool IsExpired(bool serveStale)
@@ -581,7 +582,7 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
 
             if (obj is DnsResourceRecord other)
             {
-                if (!_name.Equals(other._name, StringComparison.OrdinalIgnoreCase))
+                if (!DnsDatagram.EqualsIgnoreCaseAscii(_name, other._name))
                     return false;
 
                 if (_type != other._type)
@@ -601,7 +602,7 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
 
         public override int GetHashCode()
         {
-            return HashCode.Combine(_name, _type, _class, _ttl, _rData);
+            return HashCode.Combine(DnsDatagram.GetHashCodeIgnoreCaseAscii(_name), _type, _class, _ttl, _rData);
         }
 
         public int CompareTo(DnsResourceRecord other)
@@ -682,7 +683,7 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
         {
             get
             {
-                if (_setExpiry)
+                if (Volatile.Read(ref _setExpiry))
                 {
                     DateTime utcNow = DateTime.UtcNow;
 
@@ -703,7 +704,7 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
         {
             get
             {
-                if (_setExpiry)
+                if (Volatile.Read(ref _setExpiry))
                     return DateTime.UtcNow > _ttlExpires;
 
                 return false;

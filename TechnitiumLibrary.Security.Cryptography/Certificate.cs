@@ -21,6 +21,7 @@ using System;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
+using TechnitiumLibrary.Net.Dns;
 using TechnitiumLibrary.Net.Proxy;
 
 namespace TechnitiumLibrary.Security.Cryptography
@@ -203,7 +204,7 @@ namespace TechnitiumLibrary.Security.Cryptography
                         case CertificateCapability.SignDomainUserCertificate:
                             //check if issuer email domain matches with user email domain
 
-                            if (!_issuedTo.FieldExists(CertificateProfileFlags.EmailAddress) || !signingCert.IssuedTo.EmailAddress.Host.Equals(_issuedTo.EmailAddress.Host, StringComparison.OrdinalIgnoreCase))
+                            if (!_issuedTo.FieldExists(CertificateProfileFlags.EmailAddress) || !DnsDatagram.EqualsIgnoreCaseAscii(signingCert.IssuedTo.EmailAddress.Host, _issuedTo.EmailAddress.Host))
                                 throw new CryptoException("Signing certificate domain must match with user certificate email address domain.");
 
                             break;
@@ -215,12 +216,14 @@ namespace TechnitiumLibrary.Security.Cryptography
             }
 
             _revocationUri = revocationUri;
+            _lastHashAlgo = null;
             _issuerSignature = new Signature(GetHash(hashAlgo), hashAlgo, signingCert, privateKey);
         }
 
         public void SelfSign(string hashAlgo, AsymmetricCryptoKey privateKey, Uri revocationUri)
         {
             _revocationUri = revocationUri;
+            _lastHashAlgo = null;
             _issuerSignature = new Signature(GetHash(hashAlgo), hashAlgo, null, privateKey);
         }
 
@@ -299,7 +302,7 @@ namespace TechnitiumLibrary.Security.Cryptography
                         case CertificateCapability.SignDomainUserCertificate:
                             //check if issuer email domain matches with user email domain
 
-                            if (!_issuedTo.FieldExists(CertificateProfileFlags.EmailAddress) || !issuerCert.IssuedTo.EmailAddress.Host.Equals(_issuedTo.EmailAddress.Host, StringComparison.OrdinalIgnoreCase))
+                            if (!_issuedTo.FieldExists(CertificateProfileFlags.EmailAddress) || !DnsDatagram.EqualsIgnoreCaseAscii(issuerCert.IssuedTo.EmailAddress.Host, _issuedTo.EmailAddress.Host))
                                 throw new CryptoException("Certificate issuer '" + issuerCert._issuedTo.Name + "' domain must match with user certificate email address domain.");
 
                             break;
@@ -345,8 +348,11 @@ namespace TechnitiumLibrary.Security.Cryptography
 
             #region check if user cert is expired
 
-            if ((_type == CertificateType.User) && HasExpired())
+            if (HasExpired())
                 throw new InvalidCertificateException("Certificate issued to '" + _issuedTo.Name + "' has expired.");
+
+            if ((issuerCert != null) && issuerCert.HasExpired())
+                throw new InvalidCertificateException("Issuer '" + issuerCert._issuedTo.Name + "' certificate has expired.");
 
             #endregion
         }
@@ -369,8 +375,10 @@ namespace TechnitiumLibrary.Security.Cryptography
                 {
                     throw;
                 }
-                catch
-                { }
+                catch (Exception ex)
+                {
+                    throw new InvalidCertificateException("Failed to verify the revocation list for certificate issued to '" + _issuedTo.Name + "'.", ex);
+                }
 
                 if (revoked)
                     throw new InvalidCertificateException("Certificate serial number '" + _serialNumber + "' issued to '" + _issuedTo.Name + "' has been revoked on " + revokeCert.RevokedOnUTC + " UTC by the certificate authority and hence is invalid.");
@@ -431,12 +439,26 @@ namespace TechnitiumLibrary.Security.Cryptography
             if (_issuerSignature == cert._issuerSignature)
                 return true;
 
+            if ((_issuerSignature is null) || (cert._issuerSignature is null))
+                return false;
+
             return _issuerSignature.Equals(cert._issuerSignature);
         }
 
         public override int GetHashCode()
         {
-            return base.GetHashCode();
+            HashCode hash = new HashCode();
+            hash.Add(_version);
+            hash.Add(_type);
+            hash.Add(_serialNumber);
+            hash.Add(_issuedTo);
+            hash.Add(_capability);
+            hash.Add(_issuedOnUTC);
+            hash.Add(_expiresOnUTC);
+            hash.Add(_publicKeyEncryptionAlgorithm);
+            hash.Add(_publicKeyXML);
+            hash.Add(_issuerSignature);
+            return hash.ToHashCode();
         }
 
         public byte[] GetHash(string hashAlgorithm)

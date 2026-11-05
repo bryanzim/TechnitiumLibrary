@@ -40,19 +40,24 @@ namespace TechnitiumLibrary
 
         static Base32()
         {
-            {
-                REVERSE_BASE32_MAP = new int[255];
+            REVERSE_BASE32_MAP = CreateReverseMap(BASE32_MAP);
+            REVERSE_BASE32_HEX_MAP = CreateReverseMap(BASE32_HEX_MAP);
+        }
 
-                for (int i = 0; i < BASE32_MAP.Length; i++)
-                    REVERSE_BASE32_MAP[BASE32_MAP[i]] = i;
+        static int[] CreateReverseMap(char[] map)
+        {
+            int[] reverse = new int[128];
+            Array.Fill(reverse, -1);
+
+            for (int i = 0; i < map.Length; i++)
+            {
+                reverse[map[i]] = i;
+
+                if ((map[i] >= 'A') && (map[i] <= 'Z'))
+                    reverse[map[i] - 'A' + 'a'] = i;
             }
 
-            {
-                REVERSE_BASE32_HEX_MAP = new int[255];
-
-                for (int i = 0; i < BASE32_HEX_MAP.Length; i++)
-                    REVERSE_BASE32_HEX_MAP[BASE32_HEX_MAP[i]] = i;
-            }
+            return reverse;
         }
 
         #endregion
@@ -159,35 +164,54 @@ namespace TechnitiumLibrary
 
             if (data.Length > 0)
             {
-                while (data[data.Length - 1 - paddingCount] == '=')
+                while ((paddingCount < data.Length) && (data[data.Length - 1 - paddingCount] == '='))
                     paddingCount++;
             }
+
+            for (int i = 0; i < data.Length - paddingCount; i++)
+            {
+                char symbol = data[i];
+                if ((symbol >= rmap.Length) || (rmap[symbol] < 0))
+                    throw new ArgumentException("The string is not a valid base32 string.", nameof(data));
+            }
+
+            int payloadLength = data.Length - paddingCount;
+            int remainder = payloadLength % 8;
+            if ((remainder == 1) || (remainder == 3) || (remainder == 6))
+                throw new ArgumentException("The string is not a valid base32 string.", nameof(data));
+
+            int decodedLength;
 
             switch (paddingCount)
             {
                 case 0:
-                    buffer = new byte[(data.Length * 5 / 8)];
+                    decodedLength = data.Length * 5 / 8;
                     break;
 
                 case 1:
-                    buffer = new byte[(data.Length * 5 / 8) - 1];
+                    decodedLength = (data.Length * 5 / 8) - 1;
                     break;
 
                 case 3:
-                    buffer = new byte[(data.Length * 5 / 8) - 2];
+                    decodedLength = (data.Length * 5 / 8) - 2;
                     break;
 
                 case 4:
-                    buffer = new byte[(data.Length * 5 / 8) - 3];
+                    decodedLength = (data.Length * 5 / 8) - 3;
                     break;
 
                 case 6:
-                    buffer = new byte[(data.Length * 5 / 8) - 4];
+                    decodedLength = (data.Length * 5 / 8) - 4;
                     break;
 
                 default:
                     throw new ArgumentException("The string is not a valid base32 string or has invalid padding.", nameof(data));
             }
+
+            if (decodedLength < 0)
+                throw new ArgumentException("The string is not a valid base32 string or has invalid padding.", nameof(data));
+
+            buffer = new byte[decodedLength];
 
             int r = (data.Length - paddingCount) % 8;
             int l = data.Length - paddingCount - r;

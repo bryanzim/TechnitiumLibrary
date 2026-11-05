@@ -60,7 +60,7 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
 
         protected override void WriteRecordData(Stream s, List<DnsDomainOffset> domainEntries, bool canonicalForm)
         {
-            DnsDatagram.SerializeDomainName(canonicalForm ? _domain.ToLowerInvariant() : _domain, s, domainEntries);
+            DnsDatagram.SerializeDomainName(canonicalForm ? DnsDatagram.ToLowerInvariantAscii(_domain) : _domain, s, domainEntries);
         }
 
         #endregion
@@ -69,7 +69,7 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
 
         internal override void NormalizeName()
         {
-            _domain = _domain.ToLowerInvariant();
+            _domain = DnsDatagram.ToLowerInvariantAscii(_domain);
         }
 
         internal static async Task<DnsPTRRecordData> FromZoneFileEntryAsync(ZoneFile zoneFile)
@@ -99,14 +99,14 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
                 return true;
 
             if (obj is DnsPTRRecordData other)
-                return _domain.Equals(other._domain, StringComparison.OrdinalIgnoreCase);
+                return DnsDatagram.EqualsIgnoreCaseAscii(_domain, other._domain);
 
             return false;
         }
 
         public override int GetHashCode()
         {
-            return HashCode.Combine(_domain);
+            return DnsDatagram.GetHashCodeIgnoreCaseAscii(_domain);
         }
 
         public override void SerializeTo(Utf8JsonWriter jsonWriter)

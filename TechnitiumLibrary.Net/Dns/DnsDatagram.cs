@@ -437,7 +437,7 @@ namespace TechnitiumLibrary.Net.Dns
                     //search domain list
                     foreach (DnsDomainOffset domainEntry in domainEntries)
                     {
-                        if (domain.Equals(domainEntry.Domain.Span, StringComparison.OrdinalIgnoreCase))
+                        if (EqualsIgnoreCaseAscii(domain, domainEntry.Domain.Span))
                         {
                             //found matching domain offset for compression
                             ushort pointer = 0xC000;
@@ -503,6 +503,7 @@ namespace TechnitiumLibrary.Net.Dns
             Span<char> domain = stackalloc char[256];
             Span<byte> buffer = stackalloc byte[63];
             int domainPosition = 0;
+            int uncompressedLength = 0;
 
             while (labelLength > 0)
             {
@@ -513,13 +514,21 @@ namespace TechnitiumLibrary.Net.Dns
                         throw new EndOfStreamException();
 
                     int offset = ((labelLength << 8) | secondByte) & 0x3FFF;
+                    long pointerStart = s.Position - 2;
+                    if ((offset >= pointerStart) || (s.CanSeek && (offset >= s.Length)))
+                        throw new DnsClientException("Error while reading domain name: compression pointer must point backward inside the message.");
+
                     long currentPosition = s.Position;
                     s.Position = offset;
 
                     string domainSuffix = DeserializeDomainName(s, maxDepth - 1, ignoreMissingNullTermination, isEmailAddress);
+                    int suffixWireLength = domainSuffix.Length == 0 ? 1 : domainSuffix.Length + 2;
+                    if (uncompressedLength + suffixWireLength > 255)
+                        throw new DnsClientException("Error while reading domain name: domain name length cannot exceed 255 bytes.");
+
                     if (domainSuffix.Length > 0)
                     {
-                        if (!domainSuffix.AsSpan().TryCopyTo(domain.Slice(domainPosition)))
+                        if ((domainPosition + domainSuffix.Length >= domain.Length) || !domainSuffix.AsSpan().TryCopyTo(domain.Slice(domainPosition)))
                             throw new DnsClientException("Error while reading domain name: domain name length cannot exceed 255 bytes.");
 
                         domainPosition += domainSuffix.Length;
@@ -533,6 +542,9 @@ namespace TechnitiumLibrary.Net.Dns
                 if (labelLength > 63)
                     throw new DnsClientException("Error while reading domain name: label length cannot exceed 63 bytes.");
 
+                if ((uncompressedLength + labelLength + 2 > 255) || (domainPosition + labelLength >= domain.Length))
+                    throw new DnsClientException("Error while reading domain name: domain name length cannot exceed 255 bytes.");
+
                 Span<byte> label = buffer.Slice(0, labelLength);
                 s.ReadExactly(label);
 
@@ -540,6 +552,10 @@ namespace TechnitiumLibrary.Net.Dns
                     throw new DnsClientException("Error while reading domain name: domain name length cannot exceed 255 bytes.");
 
                 domainPosition += labelLength;
+                uncompressedLength += 1 + labelLength;
+
+                if (domainPosition >= domain.Length)
+                    throw new DnsClientException("Error while reading domain name: domain name length cannot exceed 255 bytes.");
 
                 if (isEmailAddress)
                 {
@@ -590,6 +606,63 @@ namespace TechnitiumLibrary.Net.Dns
             return buffer is null ? domain : new string(buffer);
         }
 
+        internal static bool EqualsIgnoreCaseAscii(ReadOnlySpan<char> x, ReadOnlySpan<char> y)
+        {
+            if (x.Length != y.Length)
+                return false;
+
+            for (int i = 0; i < x.Length; i++)
+            {
+                char a = x[i];
+                char b = y[i];
+
+                if ((a >= 'A') && (a <= 'Z'))
+                    a = (char)(a + 0x20);
+
+                if ((b >= 'A') && (b <= 'Z'))
+                    b = (char)(b + 0x20);
+
+                if (a != b)
+                    return false;
+            }
+
+            return true;
+        }
+
+        public static bool EqualsIgnoreCaseAscii(string x, string y)
+        {
+            if (ReferenceEquals(x, y))
+                return true;
+
+            if ((x is null) || (y is null))
+                return false;
+
+            return EqualsIgnoreCaseAscii(x.AsSpan(), y.AsSpan());
+        }
+
+        public static bool EndsWithIgnoreCaseAscii(string name, string suffix)
+        {
+            if ((name is null) || (suffix is null) || (suffix.Length > name.Length))
+                return false;
+
+            return EqualsIgnoreCaseAscii(name.AsSpan(name.Length - suffix.Length), suffix.AsSpan());
+        }
+
+        public static int GetHashCodeIgnoreCaseAscii(string value)
+        {
+            HashCode hash = new HashCode();
+
+            foreach (char c in value)
+            {
+                if ((c >= 'A') && (c <= 'Z'))
+                    hash.Add((char)(c + 0x20));
+                else
+                    hash.Add(c);
+            }
+
+            return hash.ToHashCode();
+        }
+
         public static int GetSerializeDomainNameLength(string domain)
         {
             if (domain.Length == 0)
@@ -600,7 +673,29 @@ namespace TechnitiumLibrary.Net.Dns
 
         internal static string EncodeCharacterString(string value)
         {
-            return "\"" + value.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
+            StringBuilder encoded = new StringBuilder(value.Length + 2);
+            encoded.Append('"');
+
+            foreach (char c in value)
+            {
+                if ((c == '\\') || (c == '"'))
+                {
+                    encoded.Append('\\');
+                    encoded.Append(c);
+                }
+                else if ((c < 0x20) || ((c > 0x7E) && (c <= 0xFF)))
+                {
+                    encoded.Append('\\');
+                    encoded.Append(((byte)c).ToString("D3"));
+                }
+                else
+                {
+                    encoded.Append(c);
+                }
+            }
+
+            encoded.Append('"');
+            return encoded.ToString();
         }
 
         internal static string DecodeCharacterString(string value)
@@ -1029,7 +1124,7 @@ namespace TechnitiumLibrary.Net.Dns
 
             foreach (DnsResourceRecord record in _answer)
             {
-                if (!record.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
+                if (!DnsDatagram.EqualsIgnoreCaseAscii(record.Name, name))
                     continue;
 
                 if (record.Type == question.Type)
@@ -1042,9 +1137,6 @@ namespace TechnitiumLibrary.Net.Dns
                     name = (record.RDATA as DnsCNAMERecordData).Domain;
                 }
             }
-
-            if (lastAnswer is null)
-                return _answer[_answer.Count - 1];
 
             return lastAnswer;
         }
@@ -1485,7 +1577,7 @@ namespace TechnitiumLibrary.Net.Dns
             ushort expectedMacSize = GetTsigMacSize(tsig.AlgorithmName);
 
             //Key Check
-            if ((expectedMacSize == ushort.MinValue) || (keys is null) || !keys.TryGetValue(tsigRecord.Name.ToLowerInvariant(), out TsigKey key) || !key.AlgorithmName.Equals(tsig.AlgorithmName, StringComparison.OrdinalIgnoreCase))
+            if ((expectedMacSize == ushort.MinValue) || (keys is null) || !keys.TryGetValue(ToLowerInvariantAscii(tsigRecord.Name), out TsigKey key) || !DnsDatagram.EqualsIgnoreCaseAscii(key.AlgorithmName, tsig.AlgorithmName))
             {
                 unsignedRequest = null;
 
@@ -1616,7 +1708,7 @@ namespace TechnitiumLibrary.Net.Dns
                     break;
             }
 
-            if ((keys is null) || !keys.TryGetValue(requestTsigRecord.Name.ToLowerInvariant(), out TsigKey key) || !key.AlgorithmName.Equals(requestTsig.AlgorithmName, StringComparison.OrdinalIgnoreCase))
+            if ((keys is null) || !keys.TryGetValue(ToLowerInvariantAscii(requestTsigRecord.Name), out TsigKey key) || !DnsDatagram.EqualsIgnoreCaseAscii(key.AlgorithmName, requestTsig.AlgorithmName))
                 throw new InvalidOperationException("Cannot sign this datagram: key not found or algorithm mismatch.");
 
             byte[] mac = ComputeTsigResponseMac(requestTsigRecord, key.KeyName, key.AlgorithmName, timeSigned, requestTsig.Fudge, error, otherData, key.SharedSecret, 0);
@@ -1688,7 +1780,7 @@ namespace TechnitiumLibrary.Net.Dns
                         currentAdditional = list;
                     }
 
-                    DnsDatagram signedCurrent = new DnsDatagram(signedRequest._ID, _QR == 1, _OPCODE, _AA == 1, _TC == 1, _RD == 1, _RA == 1, _AD == 1, _CD == 1, _RCODE, current._question, current._answer, current._authority, currentAdditional);
+                    DnsDatagram signedCurrent = new DnsDatagram(signedRequest._ID, current._QR == 1, current._OPCODE, current._AA == 1, current._TC == 1, current._RD == 1, current._RA == 1, current._AD == 1, current._CD == 1, current._RCODE, current._question, current._answer, current._authority, currentAdditional);
 
                     current = current._nextDatagram;
                     priorTsig = currentTsig;
@@ -1698,6 +1790,18 @@ namespace TechnitiumLibrary.Net.Dns
             }
 
             return signedDatagram;
+        }
+
+        static bool IsTsigTimeValid(ulong timeSigned, ushort fudge, DateTime utcNow)
+        {
+            long unixNow = new DateTimeOffset(DateTime.SpecifyKind(utcNow, DateTimeKind.Utc)).ToUnixTimeSeconds();
+            if (unixNow < 0)
+                return false;
+
+            ulong now = (ulong)unixNow;
+            ulong start = timeSigned >= fudge ? timeSigned - fudge : 0;
+            ulong end = fudge > (ulong.MaxValue - timeSigned) ? ulong.MaxValue : timeSigned + fudge;
+            return (now >= start) && (now <= end);
         }
 
         public bool VerifySignedResponse(DnsDatagram signedRequest, TsigKey key, out DnsDatagram unsignedResponse, out bool requestFailed, out DnsResponseCode rCode, out DnsTsigError error, out string errorMessage)
@@ -1723,7 +1827,7 @@ namespace TechnitiumLibrary.Net.Dns
             ushort expectedMacSize = GetTsigMacSize(tsig.AlgorithmName);
 
             //Key Check
-            if ((expectedMacSize == ushort.MinValue) || !key.KeyName.Equals(tsigRecord.Name, StringComparison.OrdinalIgnoreCase) || !key.AlgorithmName.Equals(tsig.AlgorithmName, StringComparison.OrdinalIgnoreCase))
+            if ((expectedMacSize == ushort.MinValue) || !DnsDatagram.EqualsIgnoreCaseAscii(key.KeyName, tsigRecord.Name) || !DnsDatagram.EqualsIgnoreCaseAscii(key.AlgorithmName, tsig.AlgorithmName))
             {
                 unsignedResponse = null;
                 requestFailed = false;
@@ -1788,10 +1892,8 @@ namespace TechnitiumLibrary.Net.Dns
 
             //Check time values
             DateTime utcNow = DateTime.UtcNow;
-            DateTime startTime = DateTime.UnixEpoch.AddSeconds(tsig.TimeSigned - tsig.Fudge);
-            DateTime endTime = DateTime.UnixEpoch.AddSeconds(tsig.TimeSigned + tsig.Fudge);
 
-            if ((utcNow < startTime) || (utcNow > endTime))
+            if (!IsTsigTimeValid(tsig.TimeSigned, tsig.Fudge, utcNow))
             {
                 unsignedResponse = null;
                 requestFailed = false;
@@ -1863,7 +1965,10 @@ namespace TechnitiumLibrary.Net.Dns
                     if (!current.IsSigned)
                     {
                         if (dnsMessages.Count < 100)
+                        {
+                            current = current._nextDatagram;
                             continue; //MUST accept up to 99 intermediary messages without a TSIG
+                        }
 
                         unsignedResponse = null;
                         requestFailed = false;
@@ -1900,10 +2005,7 @@ namespace TechnitiumLibrary.Net.Dns
                     }
 
                     //Check time values
-                    DateTime currentStartTime = DateTime.UnixEpoch.AddSeconds(currentTsig.TimeSigned - currentTsig.Fudge);
-                    DateTime currentEndTime = DateTime.UnixEpoch.AddSeconds(currentTsig.TimeSigned + currentTsig.Fudge);
-
-                    if ((utcNow < currentStartTime) || (utcNow > currentEndTime))
+                    if (!IsTsigTimeValid(currentTsig.TimeSigned, currentTsig.Fudge, utcNow))
                     {
                         unsignedResponse = null;
                         requestFailed = false;
@@ -1926,17 +2028,17 @@ namespace TechnitiumLibrary.Net.Dns
 
                     IReadOnlyList<DnsResourceRecord> currentAdditional;
 
-                    if (_additional.Count == 1)
+                    if (current._additional.Count == 1)
                     {
                         currentAdditional = [];
                     }
                     else
                     {
-                        List<DnsResourceRecord> list = new List<DnsResourceRecord>(_additional.Count - 1);
+                        List<DnsResourceRecord> list = new List<DnsResourceRecord>(current._additional.Count - 1);
 
-                        for (int i = 0; i < _additional.Count - 1; i++)
+                        for (int i = 0; i < current._additional.Count - 1; i++)
                         {
-                            DnsResourceRecord record = _additional[i];
+                            DnsResourceRecord record = current._additional[i];
 
                             if (record.Type == DnsResourceRecordType.TSIG)
                             {
@@ -1955,7 +2057,7 @@ namespace TechnitiumLibrary.Net.Dns
                         currentAdditional = list;
                     }
 
-                    DnsDatagram unsignedCurrentResponse = new DnsDatagram(currentTsig.OriginalID, _QR == 1, _OPCODE, _AA == 1, _TC == 1, _RD == 1, _RA == 1, _AD == 1, _CD == 1, _RCODE, current._question, current._answer, current._authority, currentAdditional);
+                    DnsDatagram unsignedCurrentResponse = new DnsDatagram(currentTsig.OriginalID, current._QR == 1, current._OPCODE, current._AA == 1, current._TC == 1, current._RD == 1, current._RA == 1, current._AD == 1, current._CD == 1, current._RCODE, current._question, current._answer, current._authority, currentAdditional);
 
                     unsignedPrior._nextDatagram = unsignedCurrentResponse;
                     unsignedPrior = unsignedCurrentResponse;
@@ -2009,10 +2111,10 @@ namespace TechnitiumLibrary.Net.Dns
                 }
 
                 //write TSIG Variables (request)
-                SerializeDomainName(keyName.ToLowerInvariant(), mS); //NAME
+                SerializeDomainName(ToLowerInvariantAscii(keyName), mS); //NAME
                 WriteUInt16NetworkOrder((ushort)DnsClass.ANY, mS); //CLASS
                 WriteUInt32NetworkOrder(0u, mS); //TTL
-                SerializeDomainName(algorithmName.ToLowerInvariant(), mS); //Algorithm Name
+                SerializeDomainName(ToLowerInvariantAscii(algorithmName), mS); //Algorithm Name
                 WriteUInt48NetworkOrder(timeSigned, mS); //Time Signed
                 WriteUInt16NetworkOrder(fudge, mS); //Fudge
                 WriteUInt16NetworkOrder((ushort)error, mS); //Error
@@ -2052,10 +2154,10 @@ namespace TechnitiumLibrary.Net.Dns
                 }
 
                 //write TSIG Variables (response)
-                SerializeDomainName(keyName.ToLowerInvariant(), mS); //NAME
+                SerializeDomainName(ToLowerInvariantAscii(keyName), mS); //NAME
                 WriteUInt16NetworkOrder((ushort)DnsClass.ANY, mS); //CLASS
                 WriteUInt32NetworkOrder(0u, mS); //TTL
-                SerializeDomainName(algorithmName.ToLowerInvariant(), mS); //Algorithm Name
+                SerializeDomainName(ToLowerInvariantAscii(algorithmName), mS); //Algorithm Name
                 WriteUInt48NetworkOrder(timeSigned, mS); //Time Signed
                 WriteUInt16NetworkOrder(fudge, mS); //Fudge
                 WriteUInt16NetworkOrder((ushort)error, mS); //Error
@@ -2107,7 +2209,7 @@ namespace TechnitiumLibrary.Net.Dns
 
         private static ushort GetTsigMacSize(string algorithmName)
         {
-            switch (algorithmName.ToLowerInvariant())
+            switch (ToLowerInvariantAscii(algorithmName))
             {
                 case DnsTSIGRecordData.ALGORITHM_NAME_HMAC_MD5:
                     return 16;
@@ -2153,7 +2255,7 @@ namespace TechnitiumLibrary.Net.Dns
 
             byte[] mac;
 
-            switch (algorithmName.ToLowerInvariant())
+            switch (ToLowerInvariantAscii(algorithmName))
             {
                 case DnsTSIGRecordData.ALGORITHM_NAME_HMAC_MD5:
                     using (HMAC hmac = new HMACMD5(key))

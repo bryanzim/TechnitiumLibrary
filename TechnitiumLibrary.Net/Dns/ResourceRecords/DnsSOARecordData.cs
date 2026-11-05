@@ -72,7 +72,9 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
             //(i1 < i2 and i2 - i1 > 2^(SERIAL_BITS - 1)) or
             //(i1 > i2 and i1 -i2 < 2^(SERIAL_BITS - 1))
 
-            return ((newSerial < currentSerial) && ((currentSerial - newSerial) > (uint.MaxValue >> 1))) || ((newSerial > currentSerial) && ((newSerial - currentSerial) < (uint.MaxValue >> 1)));
+            const uint halfRange = 1u << 31;
+
+            return ((newSerial < currentSerial) && ((currentSerial - newSerial) > halfRange)) || ((newSerial > currentSerial) && ((newSerial - currentSerial) < halfRange));
         }
 
         #endregion
@@ -92,8 +94,8 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
 
         protected override void WriteRecordData(Stream s, List<DnsDomainOffset> domainEntries, bool canonicalForm)
         {
-            DnsDatagram.SerializeDomainName(canonicalForm ? _primaryNameServer.ToLowerInvariant() : _primaryNameServer, s, domainEntries);
-            DnsDatagram.SerializeDomainName(canonicalForm ? _responsiblePerson.ToLowerInvariant() : _responsiblePerson, s, domainEntries, true);
+            DnsDatagram.SerializeDomainName(canonicalForm ? DnsDatagram.ToLowerInvariantAscii(_primaryNameServer) : _primaryNameServer, s, domainEntries);
+            DnsDatagram.SerializeDomainName(canonicalForm ? DnsDatagram.ToLowerInvariantAscii(_responsiblePerson) : _responsiblePerson, s, domainEntries, true);
             DnsDatagram.WriteUInt32NetworkOrder(_serial, s);
             DnsDatagram.WriteUInt32NetworkOrder(_refresh, s);
             DnsDatagram.WriteUInt32NetworkOrder(_retry, s);
@@ -107,8 +109,8 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
 
         internal override void NormalizeName()
         {
-            _primaryNameServer = _primaryNameServer.ToLowerInvariant();
-            _responsiblePerson = _responsiblePerson.ToLowerInvariant();
+            _primaryNameServer = DnsDatagram.ToLowerInvariantAscii(_primaryNameServer);
+            _responsiblePerson = DnsDatagram.ToLowerInvariantAscii(_responsiblePerson);
         }
 
         internal static async Task<DnsSOARecordData> FromZoneFileEntryAsync(ZoneFile zoneFile)
@@ -214,10 +216,10 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
 
             if (obj is DnsSOARecordData other)
             {
-                if (!_primaryNameServer.Equals(other._primaryNameServer, StringComparison.OrdinalIgnoreCase))
+                if (!DnsDatagram.EqualsIgnoreCaseAscii(_primaryNameServer, other._primaryNameServer))
                     return false;
 
-                if (!_responsiblePerson.Equals(other._responsiblePerson, StringComparison.OrdinalIgnoreCase))
+                if (!DnsDatagram.EqualsIgnoreCaseAscii(_responsiblePerson, other._responsiblePerson))
                     return false;
 
                 if (_serial != other._serial)
@@ -243,7 +245,7 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
 
         public override int GetHashCode()
         {
-            return HashCode.Combine(_primaryNameServer, _responsiblePerson, _serial, _refresh, _retry, _expire, _minimum);
+            return HashCode.Combine(DnsDatagram.GetHashCodeIgnoreCaseAscii(_primaryNameServer), DnsDatagram.GetHashCodeIgnoreCaseAscii(_responsiblePerson), _serial, _refresh, _retry, _expire, _minimum);
         }
 
         public override void SerializeTo(Utf8JsonWriter jsonWriter)
