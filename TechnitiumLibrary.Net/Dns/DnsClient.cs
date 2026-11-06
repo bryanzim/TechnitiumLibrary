@@ -3643,9 +3643,34 @@ namespace TechnitiumLibrary.Net.Dns
             switch (response.RCODE)
             {
                 case DnsResponseCode.NxDomain:
-                    //NX Domain was already validated thus DS does not exists
-                    dsRecords = null;
-                    return new Tuple<bool, IReadOnlyList<DnsResourceRecord>>(true, dsRecords);
+                    if (response.Authority.Count > 0)
+                    {
+                        //NXDOMAIN means the name does not exist. It proves an unsigned zone only when the denial-of-existence proof says so.
+                        DnssecProofOfNonExistence proofOfNonExistence = await GetValidatedProofOfNonExistenceAsync(response, ownerName, DnsResourceRecordType.DS, context);
+                        switch (proofOfNonExistence)
+                        {
+                            case DnssecProofOfNonExistence.InsecureDelegation:
+                            case DnssecProofOfNonExistence.OptOut:
+                            case DnssecProofOfNonExistence.UnsupportedNSEC3IterationsValue:
+                                dsRecords = null;
+                                return new Tuple<bool, IReadOnlyList<DnsResourceRecord>>(true, dsRecords);
+
+                            case DnssecProofOfNonExistence.NoData:
+                                //empty non-terminal; must be a sub domain
+                                dsRecords = Array.Empty<DnsResourceRecord>();
+                                return new Tuple<bool, IReadOnlyList<DnsResourceRecord>>(true, dsRecords);
+                        }
+
+                        DnsResourceRecord firstAuthority = response.FindFirstAuthorityRecord();
+                        if ((firstAuthority is not null) && (firstAuthority.Type == DnsResourceRecordType.SOA) && (firstAuthority.DnssecStatus == DnssecStatus.Insecure))
+                        {
+                            //zone is unsigned
+                            dsRecords = null;
+                            return new Tuple<bool, IReadOnlyList<DnsResourceRecord>>(true, dsRecords);
+                        }
+                    }
+
+                    break;
 
                 case DnsResponseCode.NoError:
                     if ((response.Question[0].Type == DnsResourceRecordType.DS) && DnsDatagram.EqualsIgnoreCaseAscii(response.Question[0].Name, ownerName))
