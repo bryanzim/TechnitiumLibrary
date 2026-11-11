@@ -1,4 +1,4 @@
-using System.Net;
+using IPAddress = System.Net.IPAddress;
 using TechnitiumLibrary.Net.Dns;
 using TechnitiumLibrary.Net.Dns.EDnsOptions;
 using TechnitiumLibrary.Net.Dns.ResourceRecords;
