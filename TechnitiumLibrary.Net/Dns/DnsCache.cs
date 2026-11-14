@@ -900,7 +900,7 @@ namespace TechnitiumLibrary.Net.Dns
                                 break;
                         }
                     }
-                    else if ((answer.Type == DnsResourceRecordType.DNAME) && DnsDatagram.EndsWithIgnoreCaseAscii(qName, "." + answer.Name))
+                    else if ((answer.Type == DnsResourceRecordType.DNAME) && DnsDatagram.IsNameUnder(qName, answer.Name))
                     {
                         cachableRecords.Add(answer);
                     }

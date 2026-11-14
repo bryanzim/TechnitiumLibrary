@@ -92,10 +92,22 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
 
         public string Substitute(string qname, string owner)
         {
-            if (_domain.Length == 0)
-                return qname.Substring(0, qname.Length - owner.Length - 1);
+            int prefixLength;
+
+            if (owner.Length == 0)
+                prefixLength = qname.Length;
+            else if (qname.Length == owner.Length)
+                prefixLength = 0;
             else
-                return qname.Substring(0, qname.Length - owner.Length) + _domain;
+                prefixLength = qname.Length - owner.Length - 1;
+
+            if (prefixLength <= 0)
+                return _domain;
+
+            if (_domain.Length == 0)
+                return qname.Substring(0, prefixLength);
+
+            return qname.Substring(0, prefixLength) + "." + _domain;
         }
 
         public override bool Equals(object obj)

@@ -126,22 +126,30 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
 
         protected override void ReadRecordData(Stream s)
         {
-            _rData = s.ReadExactly(_rdLength);
+            _order = DnsDatagram.ReadUInt16NetworkOrder(s);
+            _preference = DnsDatagram.ReadUInt16NetworkOrder(s);
+            _flags = s.ReadShortString(Encoding.ASCII);
+            _services = s.ReadShortString(Encoding.Latin1);
+            _regexp = s.ReadShortString(Encoding.Latin1);
+            _replacement = DnsDatagram.DeserializeDomainName(s);
 
-            using (MemoryStream mS = new MemoryStream(_rData))
-            {
-                _order = DnsDatagram.ReadUInt16NetworkOrder(mS);
-                _preference = DnsDatagram.ReadUInt16NetworkOrder(mS);
-                _flags = mS.ReadShortString(Encoding.ASCII);
-                _services = mS.ReadShortString(Encoding.Latin1);
-                _regexp = mS.ReadShortString(Encoding.Latin1);
-                _replacement = DnsDatagram.DeserializeDomainName(mS);
-            }
+            Serialize();
         }
 
         protected override void WriteRecordData(Stream s, List<DnsDomainOffset> domainEntries, bool canonicalForm)
         {
-            s.Write(_rData);
+            if (!canonicalForm)
+            {
+                s.Write(_rData);
+                return;
+            }
+
+            DnsDatagram.WriteUInt16NetworkOrder(_order, s);
+            DnsDatagram.WriteUInt16NetworkOrder(_preference, s);
+            s.WriteShortString(_flags, Encoding.ASCII);
+            WriteCharacterString(s, _services);
+            WriteCharacterString(s, _regexp);
+            DnsDatagram.SerializeDomainName(DnsDatagram.ToLowerInvariantAscii(_replacement), s);
         }
 
         #endregion

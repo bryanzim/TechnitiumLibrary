@@ -648,6 +648,17 @@ namespace TechnitiumLibrary.Net.Dns
             return EqualsIgnoreCaseAscii(name.AsSpan(name.Length - suffix.Length), suffix.AsSpan());
         }
 
+        public static bool IsNameUnder(string name, string zone)
+        {
+            if ((name is null) || (zone is null))
+                return false;
+
+            if (zone.Length == 0)
+                return name.Length > 0;
+
+            return EndsWithIgnoreCaseAscii(name, "." + zone);
+        }
+
         public static int GetHashCodeIgnoreCaseAscii(string value)
         {
             HashCode hash = new HashCode();

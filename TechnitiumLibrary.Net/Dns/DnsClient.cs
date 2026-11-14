@@ -1358,7 +1358,7 @@ namespace TechnitiumLibrary.Net.Dns
                                         {
                                             foreach (DnsResourceRecord answer in response.Answer)
                                             {
-                                                if ((answer.Type == DnsResourceRecordType.DNAME) && DnsDatagram.EndsWithIgnoreCaseAscii(question.Name, "." + answer.Name))
+                                                if ((answer.Type == DnsResourceRecordType.DNAME) && DnsDatagram.IsNameUnder(question.Name, answer.Name))
                                                 {
                                                     foundDNAME = true;
                                                     break;
@@ -3303,7 +3303,7 @@ namespace TechnitiumLibrary.Net.Dns
                                         if (dnameRecord.Type != DnsResourceRecordType.DNAME)
                                             continue;
 
-                                        if (DnsDatagram.EndsWithIgnoreCaseAscii(cnameRecord.Name, "." + dnameRecord.Name))
+                                        if (DnsDatagram.IsNameUnder(cnameRecord.Name, dnameRecord.Name))
                                         {
                                             string synthesizedCNAME = (dnameRecord.RDATA as DnsDNAMERecordData).Substitute(cnameRecord.Name, dnameRecord.Name);
                                             string CNAME = (cnameRecord.RDATA as DnsCNAMERecordData).Domain;
@@ -3993,7 +3993,10 @@ namespace TechnitiumLibrary.Net.Dns
 
             foreach (string unsignedZone in unsignedZones)
             {
-                if (DnsDatagram.EqualsIgnoreCaseAscii(domain, unsignedZone) || DnsDatagram.EndsWithIgnoreCaseAscii(domain, "." + unsignedZone))
+                if (unsignedZone is null)
+                    continue;
+
+                if ((unsignedZone.Length == 0) || DnsDatagram.EqualsIgnoreCaseAscii(domain, unsignedZone) || DnsDatagram.IsNameUnder(domain, unsignedZone))
                     return true;
             }
 
@@ -4043,7 +4046,7 @@ namespace TechnitiumLibrary.Net.Dns
                                     break;
                             }
                         }
-                        else if ((answer.Type == DnsResourceRecordType.DNAME) && DnsDatagram.EndsWithIgnoreCaseAscii(qName, "." + answer.Name))
+                        else if ((answer.Type == DnsResourceRecordType.DNAME) && DnsDatagram.IsNameUnder(qName, answer.Name))
                         {
                             //found DNAME
                             newAnswers.Add(answer);

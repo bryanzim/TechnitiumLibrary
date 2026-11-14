@@ -321,7 +321,7 @@ namespace TechnitiumLibrary.Net.Dns.EDnsOptions
         { get { return _extraText; } }
 
         public override int UncompressedLength
-        { get { return 2 + (_extraText is null ? 0 : _extraText.Length); } }
+        { get { return 2 + (string.IsNullOrEmpty(_extraText) ? 0 : Encoding.UTF8.GetByteCount(_extraText)); } }
 
         #endregion
     }
