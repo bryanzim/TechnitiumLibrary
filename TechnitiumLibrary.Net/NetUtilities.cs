@@ -321,15 +321,30 @@ namespace TechnitiumLibrary.Net
                                     else
                                     {
                                         byte[] addr = ip.Address.GetAddressBytes();
+                                        int prefixLength = ip.PrefixLength;
+                                        if (prefixLength < 0)
+                                            prefixLength = 0;
+                                        else if (prefixLength > 128)
+                                            prefixLength = 128;
+
+                                        int fullBytes = prefixLength / 8;
+                                        int remainingBits = prefixLength % 8;
                                         bool isInSameNetwork = true;
 
-                                        for (int i = 0; i < 8; i++)
+                                        for (int i = 0; i < fullBytes; i++)
                                         {
                                             if (addr[i] != destination[i])
                                             {
                                                 isInSameNetwork = false;
                                                 break;
                                             }
+                                        }
+
+                                        if (isInSameNetwork && (remainingBits > 0) && (fullBytes < addr.Length) && (fullBytes < destination.Length))
+                                        {
+                                            int mask = 0xFF << (8 - remainingBits);
+                                            if ((addr[fullBytes] & mask) != (destination[fullBytes] & mask))
+                                                isInSameNetwork = false;
                                         }
 
                                         if (isInSameNetwork)
@@ -410,10 +425,16 @@ namespace TechnitiumLibrary.Net
             if (ReferenceEquals(this, obj))
                 return true;
 
-            if (_nic.NetworkInterfaceType != _nic.NetworkInterfaceType)
+            if (_nic.Id != obj._nic.Id)
                 return false;
 
             if (!_localIP.Equals(obj._localIP))
+                return false;
+
+            if (!object.Equals(_subnetMask, obj._subnetMask))
+                return false;
+
+            if (!object.Equals(_broadcastIP, obj._broadcastIP))
                 return false;
 
             return true;
@@ -421,7 +442,7 @@ namespace TechnitiumLibrary.Net
 
         public override int GetHashCode()
         {
-            return HashCode.Combine(_nic, _localIP, _subnetMask, _broadcastIP);
+            return HashCode.Combine(_nic.Id, _localIP, _subnetMask, _broadcastIP);
         }
 
         #endregion

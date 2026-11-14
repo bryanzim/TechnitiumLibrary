@@ -116,7 +116,8 @@ namespace TechnitiumLibrary.Net.UPnP.Networking
                                 HttpWebRequest wReq = WebRequest.Create(descriptionUri) as HttpWebRequest;
                                 wReq.KeepAlive = false;
 
-                                desc.Load(wReq.GetResponse().GetResponseStream());
+                                using (HttpWebResponse descResponse = (HttpWebResponse)wReq.GetResponse())
+                                    desc.Load(descResponse.GetResponseStream());
 
                                 XmlNamespaceManager nsMgr = new XmlNamespaceManager(desc.NameTable);
                                 nsMgr.AddNamespace("tns", "urn:schemas-upnp-org:device-1-0");
@@ -190,6 +191,14 @@ namespace TechnitiumLibrary.Net.UPnP.Networking
 
         #region private
 
+        static string XmlEscape(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+                return "";
+
+            return value.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;").Replace("\"", "&quot;").Replace("'", "&apos;");
+        }
+
         private HttpWebResponse SOAPRequest(string SOAP, string functionName)
         {
             Exception exPPP = null;
@@ -201,6 +210,10 @@ namespace TechnitiumLibrary.Net.UPnP.Networking
                     return SOAPRequest(_controlUrlWanPPP, SOAP, functionName, "WANPPPConnection");
                 }
                 catch (WebException ex)
+                {
+                    exPPP = ex;
+                }
+                catch (InternetGatewayDeviceException ex)
                 {
                     exPPP = ex;
                 }
@@ -220,6 +233,9 @@ namespace TechnitiumLibrary.Net.UPnP.Networking
                         throw new InternetGatewayDeviceException("Server returned an error.", ex);
                 }
             }
+
+            if (exPPP != null)
+                throw exPPP;
 
             throw new InternetGatewayDeviceException("No control URL available to make UPnP SOAP request.");
         }
@@ -241,7 +257,9 @@ namespace TechnitiumLibrary.Net.UPnP.Networking
             wReq.KeepAlive = false;
             wReq.ContentType = "text/xml; charset=\"utf-8\"";
             wReq.ContentLength = buffer.Length;
-            wReq.GetRequestStream().Write(buffer, 0, buffer.Length);
+
+            using (Stream requestStream = wReq.GetRequestStream())
+                requestStream.Write(buffer, 0, buffer.Length);
 
             HttpWebResponse response;
 
@@ -251,24 +269,23 @@ namespace TechnitiumLibrary.Net.UPnP.Networking
             }
             catch (WebException ex)
             {
-                response = (HttpWebResponse)ex.Response;
+                response = ex.Response as HttpWebResponse;
             }
 
+            if (response is null)
+                throw new InternetGatewayDeviceException("UPnP device did not return a response.");
+
+            try
+            {
             int statusCode = (int)response.StatusCode;
 
             switch (statusCode)
             {
                 case 401:
-                    throw new InternetGatewayDeviceException("UPnP device returned an error: (" + statusCode + ") Invalid Action.");
-
                 case 402:
-                    throw new InternetGatewayDeviceException("UPnP device returned an error: (" + statusCode + ") Invalid Args.");
-
                 case 404:
-                    throw new InternetGatewayDeviceException("UPnP device returned an error: (" + statusCode + ") Invalid Var.");
-
                 case 501:
-                    throw new InternetGatewayDeviceException("UPnP device returned an error: (" + statusCode + ") Action Failed.");
+                    throw new InternetGatewayDeviceException("UPnP device returned an HTTP error: (" + statusCode + ") " + response.StatusDescription);
 
                 case 500:
                     try
@@ -323,6 +340,12 @@ namespace TechnitiumLibrary.Net.UPnP.Networking
                 default:
                     return response;
             }
+            }
+            catch
+            {
+                response.Dispose();
+                throw;
+            }
         }
 
         #endregion
@@ -334,11 +357,11 @@ namespace TechnitiumLibrary.Net.UPnP.Networking
             string SOAP = "<u:AddPortMapping xmlns:u=\"urn:schemas-upnp-org:service:WANPPPConnection:1\">" +
                                 "<NewRemoteHost></NewRemoteHost><NewExternalPort>" + externalPort + "</NewExternalPort><NewProtocol>" + protocol.ToString().ToUpper() + "</NewProtocol>" +
                                 "<NewInternalPort>" + internalEP.Port + "</NewInternalPort><NewInternalClient>" + internalEP.Address.ToString() + "</NewInternalClient>" +
-                                "<NewEnabled>" + (enabled ? "1" : "0") + "</NewEnabled><NewPortMappingDescription>" + description + "</NewPortMappingDescription>" +
+                                "<NewEnabled>" + (enabled ? "1" : "0") + "</NewEnabled><NewPortMappingDescription>" + XmlEscape(description) + "</NewPortMappingDescription>" +
                                 "<NewLeaseDuration>" + leaseDuration + "</NewLeaseDuration>" +
                            "</u:AddPortMapping>";
 
-            HttpWebResponse response = SOAPRequest(SOAP, "AddPortMapping");
+            using HttpWebResponse response = SOAPRequest(SOAP, "AddPortMapping");
 
             int statusCode = Convert.ToInt32(response.StatusCode);
 
@@ -381,7 +404,7 @@ namespace TechnitiumLibrary.Net.UPnP.Networking
                                 "<NewProtocol>" + protocol.ToString().ToUpper() + "</NewProtocol>" +
                           "</u:DeletePortMapping>";
 
-            HttpWebResponse response = SOAPRequest(SOAP, "DeletePortMapping");
+            using HttpWebResponse response = SOAPRequest(SOAP, "DeletePortMapping");
 
             int statusCode = Convert.ToInt32(response.StatusCode);
 
@@ -402,7 +425,7 @@ namespace TechnitiumLibrary.Net.UPnP.Networking
         {
             string SOAP = "<u:GetExternalIPAddress xmlns:u=\"urn:schemas-upnp-org:service:WANPPPConnection:1\"></u:GetExternalIPAddress>";
 
-            HttpWebResponse response = SOAPRequest(SOAP, "GetExternalIPAddress");
+            using HttpWebResponse response = SOAPRequest(SOAP, "GetExternalIPAddress");
 
             int statusCode = Convert.ToInt32(response.StatusCode);
 
@@ -450,6 +473,8 @@ namespace TechnitiumLibrary.Net.UPnP.Networking
                 }
             }
 
+            using (response)
+            {
             int statusCode = Convert.ToInt32(response.StatusCode);
 
             switch (statusCode)
@@ -475,6 +500,7 @@ namespace TechnitiumLibrary.Net.UPnP.Networking
 
                 default:
                     throw new InternetGatewayDeviceException(statusCode, "UPnP device returned an error: (" + statusCode + ") " + response.StatusDescription);
+            }
             }
         }
 
@@ -503,6 +529,8 @@ namespace TechnitiumLibrary.Net.UPnP.Networking
                 }
             }
 
+            using (response)
+            {
             int statusCode = Convert.ToInt32(response.StatusCode);
 
             switch (statusCode)
@@ -538,6 +566,7 @@ namespace TechnitiumLibrary.Net.UPnP.Networking
                 default:
                     throw new InternetGatewayDeviceException("UPnP device returned an error: (" + statusCode + ") " + response.StatusDescription);
             }
+            }
         }
 
         public bool ForwardPort(ProtocolType protocol, int externalPort, IPEndPoint internalEP, string description = "", bool force = false, uint leaseDuration = 0)
@@ -548,19 +577,14 @@ namespace TechnitiumLibrary.Net.UPnP.Networking
 
                 if (portMap != null)
                 {
-                    if (portMap.InternalEP.Equals(internalEP))
-                    {
-                        //external port already mapped
+                    bool sameTarget = portMap.InternalEP.Equals(internalEP);
+                    if (sameTarget && portMap.Enabled && (leaseDuration == 0))
                         return true;
-                    }
-                    else
-                    {
-                        //external port not available
-                        if (force)
-                            DeletePortMapping(protocol, externalPort);
-                        else
-                            return false;
-                    }
+
+                    if (!sameTarget && !force)
+                        return false;
+
+                    DeletePortMapping(protocol, externalPort);
                 }
             }
             catch

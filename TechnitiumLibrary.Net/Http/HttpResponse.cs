@@ -57,6 +57,7 @@ namespace TechnitiumLibrary.Net.Http
         public static async Task<HttpResponse> ReadResponseAsync(Stream stream, CancellationToken cancellationToken = default)
         {
             HttpResponse httpResponse = new HttpResponse();
+            HttpBufferedStream readStream = HttpBufferedStream.Get(stream);
 
             //parse http request headers
             using (MemoryStream headerBuffer = new MemoryStream(1024))
@@ -69,7 +70,7 @@ namespace TechnitiumLibrary.Net.Http
 
                 while (crlfCount != 4)
                 {
-                    length = await stream.ReadAsync(buffer, cancellationToken);
+                    length = await readStream.ReadAsync(buffer, cancellationToken);
                     if (length < 1)
                         throw new EndOfStreamException();
 
@@ -123,22 +124,35 @@ namespace TechnitiumLibrary.Net.Http
                     httpResponse._headers.Add(parts[0], parts[1]);
                 }
 
-                string strContentLength = httpResponse._headers[HttpRequestHeader.ContentLength];
-                if (!string.IsNullOrEmpty(strContentLength))
-                {
-                    httpResponse._outputStream = new HttpContentStream(stream, buffer, offset, length, int.Parse(strContentLength));
-                    return httpResponse;
-                }
-
                 string strTransferEncoding = httpResponse._headers[HttpRequestHeader.TransferEncoding];
                 if (!string.IsNullOrEmpty(strTransferEncoding))
                 {
-                    if (!strTransferEncoding.Equals("chunked", StringComparison.OrdinalIgnoreCase))
+                    if (!strTransferEncoding.Trim().Equals("chunked", StringComparison.OrdinalIgnoreCase))
                         throw new HttpRequestException("Transfer encoding is not supported: " + strTransferEncoding);
 
-                    httpResponse._outputStream = new HttpChunkedStream(new HttpContentStream(stream, buffer, offset, length));
+                    httpResponse._outputStream = new HttpChunkedStream(new HttpContentStream(readStream, buffer, offset, length));
                     return httpResponse;
                 }
+
+                string strContentLength = httpResponse._headers[HttpRequestHeader.ContentLength];
+                if (!string.IsNullOrEmpty(strContentLength))
+                {
+                    if (!int.TryParse(strContentLength, out int contentLength) || (contentLength < 0))
+                        throw new HttpRequestException("Content-Length is invalid: " + strContentLength);
+
+                    int available = length - offset;
+                    if (available > contentLength)
+                    {
+                        readStream.Unread(buffer, offset + contentLength, available - contentLength);
+                        length = offset + contentLength;
+                    }
+
+                    httpResponse._outputStream = new HttpContentStream(readStream, buffer, offset, length, contentLength);
+                    return httpResponse;
+                }
+
+                if (length > offset)
+                    readStream.Unread(buffer, offset, length - offset);
             }
 
             return httpResponse;

@@ -133,19 +133,12 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
                     if (rrsigRecord._labels == labelCount)
                     {
                         //name = fqdn
-                        name = records[0].Name.ToLowerInvariant();
+                        name = DnsDatagram.ToLowerInvariantAscii(records[0].Name);
                     }
                     else if (rrsigRecord._labels < labelCount)
                     {
                         //name = "*." | the rightmost rrsig_label labels of the fqdn
-                        name = GetWildcardDomain(records[0].Name, rrsigRecord._labels).ToLowerInvariant();
-
-                        if (rrsigRecord._typeCovered == DnsResourceRecordType.NSEC)
-                        {
-                            //wildcard NSEC can be abused by an attacker to serve NXDomain or NoData responses
-                            //fix NSEC record owner name to the original wildcard owner name
-                            records[0].FixNameForNSEC(name);
-                        }
+                        name = DnsDatagram.ToLowerInvariantAscii(GetWildcardDomain(records[0].Name, rrsigRecord._labels));
                     }
                     else
                     {
@@ -366,7 +359,7 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
             DnsDatagram.WriteUInt32NetworkOrder(_signatureExpiration, s);
             DnsDatagram.WriteUInt32NetworkOrder(_signatureInception, s);
             DnsDatagram.WriteUInt16NetworkOrder(_keyTag, s);
-            DnsDatagram.SerializeDomainName(_signersName.ToLowerInvariant(), s);
+            DnsDatagram.SerializeDomainName(DnsDatagram.ToLowerInvariantAscii(_signersName), s);
 
             if (includeSignature)
                 s.Write(_signature);
@@ -420,7 +413,7 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
                     continue;
 
                 //The RRSIG RR's Signer's Name, Algorithm, and Key Tag fields MUST match the owner name, algorithm, and key tag for some DNSKEY RR in the zone's apex DNSKEY RRset.
-                if (!dnsKeyRecord.Name.Equals(_signersName, StringComparison.OrdinalIgnoreCase))
+                if (!DnsDatagram.EqualsIgnoreCaseAscii(dnsKeyRecord.Name, _signersName))
                     continue;
 
                 DnsDNSKEYRecordData dnsKey = dnsKeyRecord.RDATA as DnsDNSKEYRecordData;
@@ -457,6 +450,15 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
 
                     if (dnsKey.PublicKey.IsSignatureValid(hash, _signature, hashAlgorithm))
                     {
+                        //Rename only after this RRSIG verifies. Doing it while hashing would let a
+                        //later invalid RRSIG stick a wider wildcard owner onto an already-valid NSEC.
+                        if ((_typeCovered == DnsResourceRecordType.NSEC) && (records.Count > 0))
+                        {
+                            byte labelCount = GetLabelCount(records[0].Name);
+                            if (_labels < labelCount)
+                                records[0].FixNameForNSEC(DnsDatagram.ToLowerInvariantAscii(GetWildcardDomain(records[0].Name, _labels)));
+                        }
+
                         extendedDnsErrorCode = EDnsExtendedDnsErrorCode.Other; //no error
                         return true;
                     }
@@ -528,7 +530,7 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
                 if (_keyTag != other._keyTag)
                     return false;
 
-                if (!_signersName.Equals(other._signersName, StringComparison.OrdinalIgnoreCase))
+                if (!DnsDatagram.EqualsIgnoreCaseAscii(_signersName, other._signersName))
                     return false;
 
                 if (!_signature.SequenceEqual(other._signature))
@@ -551,8 +553,8 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
             hash.Add(_signatureExpiration);
             hash.Add(_signatureInception);
             hash.Add(_keyTag);
-            hash.Add(_signersName);
-            hash.Add(_signature);
+            hash.Add(DnsDatagram.GetHashCodeIgnoreCaseAscii(_signersName));
+            hash.AddBytes(_signature);
 
             return hash.ToHashCode();
         }

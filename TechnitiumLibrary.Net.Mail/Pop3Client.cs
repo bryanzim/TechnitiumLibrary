@@ -79,6 +79,17 @@ namespace TechnitiumLibrary.Net.Mail
 
             if (disposing)
             {
+                try
+                {
+                    if ((_sW != null) && (_sock != null) && _sock.Connected)
+                    {
+                        _sW.WriteLine("QUIT");
+                        _sR?.ReadLine();
+                    }
+                }
+                catch
+                { }
+
                 if (_sW != null)
                     _sW.Dispose();
 
@@ -87,6 +98,8 @@ namespace TechnitiumLibrary.Net.Mail
 
                 if (_sock != null)
                     _sock.Dispose();
+
+                _sock = null;
             }
 
             _disposed = true;
@@ -110,67 +123,98 @@ namespace TechnitiumLibrary.Net.Mail
             if (_sock != null)
                 throw new Pop3Exception("Pop3Client previous connection was not closed.");
 
-            _sock = new TcpClient(_hostname, _port);
+            if (HasPop3LineBreak(_username) || HasPop3LineBreak(_password))
+                throw new Pop3Exception("Username or password contains a CR or LF character.");
 
-            Stream stream;
+            TcpClient sock = new TcpClient(_hostname, _port);
+            StreamReader reader = null;
+            StreamWriter writer = null;
 
-            if (_ssl)
+            try
             {
-                SslStream sslStream;
+                Stream stream;
 
-                if (_ignoreCertificateErrors)
-                    sslStream = new SslStream(_sock.GetStream(), false, RemoteCertificateValidationCallback);
+                if (_ssl)
+                {
+                    SslStream sslStream;
+
+                    if (_ignoreCertificateErrors)
+                        sslStream = new SslStream(sock.GetStream(), false, RemoteCertificateValidationCallback);
+                    else
+                        sslStream = new SslStream(sock.GetStream(), false);
+
+                    sslStream.AuthenticateAsClient(_hostname);
+
+                    stream = sslStream;
+                }
                 else
-                    sslStream = new SslStream(_sock.GetStream(), false);
+                    stream = sock.GetStream();
 
-                sslStream.AuthenticateAsClient(_hostname);
+                reader = new StreamReader(stream, Encoding.Latin1, false, 1);
+                writer = new StreamWriter(stream, Encoding.ASCII, 1);
+                writer.AutoFlush = true;
 
-                stream = sslStream;
+                string response = reader.ReadLine();
+                if (response == null)
+                    throw new Pop3Exception("No response from server.");
+                if (IsPop3Error(response))
+                    throw new Pop3Exception("Server returned: " + Pop3ErrorText(response));
+
+                int i = response.IndexOf('<');
+                int j = response.LastIndexOf('>');
+                bool secureAuthAvailable = ((i > -1) && (j > i));
+
+                if (_preferSecureAuth && secureAuthAvailable)
+                {
+                    string timestamp = response.Substring(i, j - i + 1);
+                    string digest = Convert.ToHexString(MD5.HashData(Encoding.ASCII.GetBytes(timestamp + _password))).ToLowerInvariant();
+
+                    writer.WriteLine("APOP " + _username + " " + digest);
+                    response = reader.ReadLine();
+                    if (response == null)
+                        throw new Pop3Exception("No response from server.");
+                    if (IsPop3Error(response))
+                        throw new Pop3InvalidUsernamePasswordException("Server returned: " + Pop3ErrorText(response));
+                }
+                else
+                {
+                    writer.WriteLine("USER " + _username);
+                    response = reader.ReadLine();
+                    if (response == null)
+                        throw new Pop3Exception("No response from server.");
+                    if (IsPop3Error(response))
+                        throw new Pop3InvalidUsernamePasswordException("Server returned: " + Pop3ErrorText(response));
+
+                    writer.WriteLine("PASS " + _password);
+                    response = reader.ReadLine();
+                    if (response == null)
+                        throw new Pop3Exception("No response from server.");
+                    if (IsPop3Error(response))
+                        throw new Pop3InvalidUsernamePasswordException("Server returned: " + Pop3ErrorText(response));
+                }
+
+                _sock = sock;
+                _sR = reader;
+                _sW = writer;
             }
-            else
-                stream = _sock.GetStream();
-
-            _sR = new StreamReader(stream, Encoding.ASCII, false, 1);
-            _sW = new StreamWriter(stream, Encoding.ASCII, 1);
-            _sW.AutoFlush = true;
-
-            string response = _sR.ReadLine();
-            if (response == null)
-                throw new Pop3Exception("No response from server.");
-            if (response.StartsWith("-ERR "))
-                throw new Pop3Exception("Server returned: " + response.Substring(5));
-
-            int i = response.IndexOf('<');
-            int j = response.LastIndexOf('>');
-            bool secureAuthAvailable = ((i > -1) && (j > i));
-
-            if (_preferSecureAuth && secureAuthAvailable)
+            catch
             {
-                string timestamp = response.Substring(i, j - i + 1);
-                string digest = Convert.ToHexString(MD5.HashData(Encoding.ASCII.GetBytes(timestamp + _password))).ToLowerInvariant();
+                try
+                {
+                    writer?.Dispose();
+                }
+                catch
+                { }
 
-                _sW.WriteLine("APOP " + _username + " " + digest);
-                response = _sR.ReadLine();
-                if (response == null)
-                    throw new Pop3Exception("No response from server.");
-                if (response.StartsWith("-ERR "))
-                    throw new Pop3InvalidUsernamePasswordException("Server returned: " + response.Substring(5));
-            }
-            else
-            {
-                _sW.WriteLine("USER " + _username);
-                response = _sR.ReadLine();
-                if (response == null)
-                    throw new Pop3Exception("No response from server.");
-                if (response.StartsWith("-ERR "))
-                    throw new Pop3InvalidUsernamePasswordException("Server returned: " + response.Substring(5));
+                try
+                {
+                    reader?.Dispose();
+                }
+                catch
+                { }
 
-                _sW.WriteLine("PASS " + _password);
-                response = _sR.ReadLine();
-                if (response == null)
-                    throw new Pop3Exception("No response from server.");
-                if (response.StartsWith("-ERR "))
-                    throw new Pop3InvalidUsernamePasswordException("Server returned: " + response.Substring(5));
+                sock.Dispose();
+                throw;
             }
         }
 
@@ -178,6 +222,17 @@ namespace TechnitiumLibrary.Net.Mail
         {
             if (_sock != null)
             {
+                try
+                {
+                    if ((_sW != null) && _sock.Connected)
+                    {
+                        _sW.WriteLine("QUIT");
+                        _sR?.ReadLine();
+                    }
+                }
+                catch
+                { }
+
                 _sock.Close();
                 _sock = null;
             }
@@ -189,8 +244,8 @@ namespace TechnitiumLibrary.Net.Mail
             string response = _sR.ReadLine();
             if (response == null)
                 throw new Pop3Exception("No response from server.");
-            if (response.StartsWith("-ERR "))
-                throw new Pop3Exception("Server returned: " + response.Substring(5));
+            if (IsPop3Error(response))
+                throw new Pop3Exception("Server returned: " + Pop3ErrorText(response));
         }
 
         public Pop3Stats STAT()
@@ -199,8 +254,8 @@ namespace TechnitiumLibrary.Net.Mail
             string response = _sR.ReadLine();
             if (response == null)
                 throw new Pop3Exception("No response from server.");
-            if (response.StartsWith("-ERR "))
-                throw new Pop3Exception("Server returned: " + response.Substring(5));
+            if (IsPop3Error(response))
+                throw new Pop3Exception("Server returned: " + Pop3ErrorText(response));
 
             string[] tmp = response.Substring(4).Split(new char[] { ' ' });
 
@@ -213,8 +268,8 @@ namespace TechnitiumLibrary.Net.Mail
             string response = _sR.ReadLine();
             if (response == null)
                 throw new Pop3Exception("No response from server.");
-            if (response.StartsWith("-ERR "))
-                throw new Pop3Exception("Server returned: " + response.Substring(5));
+            if (IsPop3Error(response))
+                throw new Pop3Exception("Server returned: " + Pop3ErrorText(response));
 
             List<Pop3MessageInfo> info = new List<Pop3MessageInfo>();
 
@@ -238,18 +293,23 @@ namespace TechnitiumLibrary.Net.Mail
             string response = _sR.ReadLine();
             if (response == null)
                 throw new Pop3Exception("No response from server.");
-            if (response.StartsWith("-ERR "))
-                throw new Pop3Exception("Server returned: " + response.Substring(5));
+            if (IsPop3Error(response))
+                throw new Pop3Exception("Server returned: " + Pop3ErrorText(response));
 
             using (MemoryStream mS = new MemoryStream())
             {
                 while (true)
                 {
                     string tmp = _sR.ReadLine();
+                    if (tmp == null)
+                        throw new EndOfStreamException();
                     if (tmp == ".")
                         break;
 
-                    byte[] tmp2 = Encoding.ASCII.GetBytes(tmp);
+                    if (tmp.StartsWith('.'))
+                        tmp = tmp.Substring(1);
+
+                    byte[] tmp2 = Encoding.Latin1.GetBytes(tmp);
                     mS.Write(tmp2, 0, tmp2.Length);
                     mS.WriteByte(0x0d);
                     mS.WriteByte(0x0a);
@@ -265,18 +325,23 @@ namespace TechnitiumLibrary.Net.Mail
             string response = _sR.ReadLine();
             if (response == null)
                 throw new Pop3Exception("No response from server.");
-            if (response.StartsWith("-ERR "))
-                throw new Pop3Exception("Server returned: " + response.Substring(5));
+            if (IsPop3Error(response))
+                throw new Pop3Exception("Server returned: " + Pop3ErrorText(response));
 
             using (MemoryStream mS = new MemoryStream())
             {
                 while (true)
                 {
                     string tmp = _sR.ReadLine();
+                    if (tmp == null)
+                        throw new EndOfStreamException();
                     if (tmp == ".")
                         break;
 
-                    byte[] tmp2 = Encoding.ASCII.GetBytes(tmp);
+                    if (tmp.StartsWith('.'))
+                        tmp = tmp.Substring(1);
+
+                    byte[] tmp2 = Encoding.Latin1.GetBytes(tmp);
                     mS.Write(tmp2, 0, tmp2.Length);
                     mS.WriteByte(0x0d);
                     mS.WriteByte(0x0a);
@@ -292,8 +357,8 @@ namespace TechnitiumLibrary.Net.Mail
             string response = _sR.ReadLine();
             if (response == null)
                 throw new Pop3Exception("No response from server.");
-            if (response.StartsWith("-ERR "))
-                throw new Pop3Exception("Server returned: " + response.Substring(5));
+            if (IsPop3Error(response))
+                throw new Pop3Exception("Server returned: " + Pop3ErrorText(response));
         }
 
         public void NOOP()
@@ -302,8 +367,8 @@ namespace TechnitiumLibrary.Net.Mail
             string response = _sR.ReadLine();
             if (response == null)
                 throw new Pop3Exception("No response from server.");
-            if (response.StartsWith("-ERR "))
-                throw new Pop3Exception("Server returned: " + response.Substring(5));
+            if (IsPop3Error(response))
+                throw new Pop3Exception("Server returned: " + Pop3ErrorText(response));
         }
 
         public void RSET()
@@ -312,8 +377,26 @@ namespace TechnitiumLibrary.Net.Mail
             string response = _sR.ReadLine();
             if (response == null)
                 throw new Pop3Exception("No response from server.");
-            if (response.StartsWith("-ERR "))
-                throw new Pop3Exception("Server returned: " + response.Substring(5));
+            if (IsPop3Error(response))
+                throw new Pop3Exception("Server returned: " + Pop3ErrorText(response));
+        }
+
+        static bool HasPop3LineBreak(string value)
+        {
+            return (value != null) && (value.IndexOfAny(new char[] { '\r', '\n' }) >= 0);
+        }
+
+        static bool IsPop3Error(string response)
+        {
+            return response.StartsWith("-ERR", StringComparison.Ordinal) && ((response.Length == 4) || (response[4] == ' '));
+        }
+
+        static string Pop3ErrorText(string response)
+        {
+            if ((response.Length > 5) && (response[4] == ' '))
+                return response.Substring(5);
+
+            return "";
         }
 
         #endregion

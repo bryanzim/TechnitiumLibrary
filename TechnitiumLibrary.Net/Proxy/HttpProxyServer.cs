@@ -160,6 +160,7 @@ namespace TechnitiumLibrary.Net.Proxy
             readonly IProxyServerAuthenticationManager _authenticationManager;
 
             Socket _remoteSocket;
+            int _originGeneration;
 
             #endregion
 
@@ -226,6 +227,10 @@ namespace TechnitiumLibrary.Net.Proxy
                 //signal client 200 OK
                 await localStream.WriteAsync(Encoding.ASCII.GetBytes(httpRequest.Protocol + " 200 OK\r\nConnection: close\r\n\r\n"));
 
+                byte[] pending = HttpBufferedStream.TakePending(localStream);
+                if (pending.Length > 0)
+                    await _remoteSocket.SendAsync(pending, SocketFlags.None);
+
                 //pipe sockets
                 _ = _localSocket.PipeToAsync(_remoteSocket).ContinueWith(delegate (Task prevTask) { Dispose(); });
             }
@@ -235,10 +240,10 @@ namespace TechnitiumLibrary.Net.Proxy
                 string content = "<h1>500 Internal Server Error</h1>";
 
                 if (!string.IsNullOrEmpty(ex.Message))
-                    content += "<p>" + ex.Message + "</p>";
+                    content += "<p>" + WebUtility.HtmlEncode(ex.Message) + "</p>";
 
                 if (Debugger.IsAttached)
-                    content += "<p>" + ex.ToString() + "</p>";
+                    content += "<p>" + WebUtility.HtmlEncode(ex.ToString()) + "</p>";
 
                 return SendResponseAsync(500, content);
             }
@@ -257,7 +262,7 @@ namespace TechnitiumLibrary.Net.Proxy
                         sb.Append(c);
                     }
 
-                    statusString = statusCode + " " + sb.ToString();
+                    statusString = sb.ToString();
                 }
 
                 string response = "HTTP/1.1 " + statusCode + " " + statusString + "\r\nDate: " + DateTime.UtcNow.ToString("R", CultureInfo.InvariantCulture) + "\r\nConnection: close\r\nContent-Type: text/html\r\nContent-Length: " + content.Length + "\r\n\r\n" + content;
@@ -381,6 +386,8 @@ namespace TechnitiumLibrary.Net.Proxy
 
                             if (!ep.IsEquals(lastEP) || !_remoteSocket.Connected)
                             {
+                                int originGeneration = Interlocked.Increment(ref _originGeneration);
+
                                 if (_remoteSocket != null)
                                 {
                                     if (_remoteSocket.Connected)
@@ -408,6 +415,9 @@ namespace TechnitiumLibrary.Net.Proxy
                                 //copy remote socket to local socket
                                 _ = _remoteSocket.CopyToAsync(_localSocket).ContinueWith(delegate (Task prevTask)
                                 {
+                                    if (Volatile.Read(ref _originGeneration) != originGeneration)
+                                        return;
+
                                     try
                                     {
                                         if ((prevTask.Status == TaskStatus.RanToCompletion) && _localSocket.Connected)

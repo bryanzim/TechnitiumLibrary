@@ -109,7 +109,7 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
 
         protected override void WriteRecordData(Stream s, List<DnsDomainOffset> domainEntries, bool canonicalForm)
         {
-            DnsDatagram.SerializeDomainName(canonicalForm ? _algorithmName.ToLowerInvariant() : _algorithmName, s); //MUST NOT be compressed
+            DnsDatagram.SerializeDomainName(canonicalForm ? DnsDatagram.ToLowerInvariantAscii(_algorithmName) : _algorithmName, s); //MUST NOT be compressed
             DnsDatagram.WriteUInt48NetworkOrder(_timeSigned, s);
             DnsDatagram.WriteUInt16NetworkOrder(_fudge, s);
 
@@ -146,7 +146,7 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
 
             if (obj is DnsTSIGRecordData other)
             {
-                if (!_algorithmName.Equals(other._algorithmName, StringComparison.OrdinalIgnoreCase))
+                if (!DnsDatagram.EqualsIgnoreCaseAscii(_algorithmName, other._algorithmName))
                     return false;
 
                 if (_timeSigned != other._timeSigned)
@@ -175,7 +175,7 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
 
         public override int GetHashCode()
         {
-            return HashCode.Combine(_algorithmName, _timeSigned, _fudge, _mac.GetArrayHashCode(), _originalID, _error, _otherData.GetArrayHashCode());
+            return HashCode.Combine(DnsDatagram.GetHashCodeIgnoreCaseAscii(_algorithmName), _timeSigned, _fudge, _mac.GetArrayHashCode(), _originalID, _error, _otherData.GetArrayHashCode());
         }
 
         public override string ToString()

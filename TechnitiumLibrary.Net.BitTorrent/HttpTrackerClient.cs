@@ -44,7 +44,7 @@ namespace TechnitiumLibrary.Net.BitTorrent
             byte[] ipBuffer = new byte[4];
             byte[] portBuffer = new byte[2];
 
-            for (int i = 0; i < data.Length; i += 6)
+            for (int i = 0; i + 6 <= data.Length; i += 6)
             {
                 Buffer.BlockCopy(data, i, ipBuffer, 0, 4);
                 Buffer.BlockCopy(data, i + 4, portBuffer, 0, 2);
@@ -69,7 +69,7 @@ namespace TechnitiumLibrary.Net.BitTorrent
             byte[] ipBuffer = new byte[16];
             byte[] portBuffer = new byte[2];
 
-            for (int i = 0; i < data.Length; i += 18)
+            for (int i = 0; i + 18 <= data.Length; i += 18)
             {
                 Buffer.BlockCopy(data, i, ipBuffer, 0, 16);
                 Buffer.BlockCopy(data, i + 16, portBuffer, 0, 2);
@@ -97,8 +97,10 @@ namespace TechnitiumLibrary.Net.BitTorrent
         {
             string queryString;
 
-            queryString = "?info_hash=" + Uri.EscapeDataString(Encoding.ASCII.GetString(_infoHash)) +
-                          "&peer_id=" + Uri.EscapeDataString(Encoding.ASCII.GetString(_clientID.PeerID));
+            string separator = _trackerURI.AbsoluteUri.Contains('?') ? "&" : "?";
+
+            queryString = separator + "info_hash=" + PercentEncode(_infoHash) +
+                          "&peer_id=" + PercentEncode(_clientID.PeerID);
 
             switch (clientEP.Address.ToString())
             {
@@ -148,79 +150,110 @@ namespace TechnitiumLibrary.Net.BitTorrent
 
             SocketsHttpHandler handler = new SocketsHttpHandler();
             handler.Proxy = _proxy;
+            handler.AutomaticDecompression = GetDecompressionMethods(_clientID.HttpAcceptEncoding);
 
             using (HttpClient httpClient = new HttpClient(handler))
             {
                 httpClient.Timeout = TimeSpan.FromMilliseconds(30000); //30 sec timeout
 
                 httpClient.DefaultRequestHeaders.Add("user-agent", _clientID.HttpUserAgent);
-                httpClient.DefaultRequestHeaders.Add("Accept-Encoding", _clientID.HttpAcceptEncoding);
 
                 using (Stream responseStream = new MemoryStream(await httpClient.GetByteArrayAsync(_trackerURI.AbsoluteUri + queryString), false))
                 {
-                    switch (@event)
+                    Bencoding x = Bencoding.Decode(responseStream);
+
+                    if (x.Type != BencodingType.Dictionary)
+                        throw new TrackerClientException("Invalid data received from tracker. Expected bencoded dictionary.");
+
+                    if (x.ValueDictionary.TryGetValue("failure reason", out Bencoding failure))
+                        throw new TrackerClientException("Tracker returned: " + failure.ValueString);
+
+                    _peers.Clear();
+
+                    foreach (var item in x.ValueDictionary)
                     {
-                        case TrackerClientEvent.None:
-                        case TrackerClientEvent.Started:
-                            Bencoding x = Bencoding.Decode(responseStream);
+                        switch (item.Key)
+                        {
+                            case "peers":
+                                switch (item.Value.Type)
+                                {
+                                    case BencodingType.String:
+                                        ParseCompactPeersIPv4(item.Value.Value as byte[], _peers);
+                                        break;
 
-                            switch (x.Type)
-                            {
-                                case BencodingType.Dictionary:
-                                    _peers.Clear();
-
-                                    foreach (var item in x.ValueDictionary)
-                                    {
-                                        switch (item.Key)
+                                    case BencodingType.List:
+                                        foreach (var peerObj in item.Value.ValueList)
                                         {
-                                            case "peers":
-                                                switch (item.Value.Type)
-                                                {
-                                                    case BencodingType.String:
-                                                        ParseCompactPeersIPv4(item.Value.Value as byte[], _peers);
-                                                        break;
+                                            var peer = peerObj.ValueDictionary;
 
-                                                    case BencodingType.List:
-                                                        foreach (var peerObj in item.Value.ValueList)
-                                                        {
-                                                            var peer = peerObj.ValueDictionary;
-
-                                                            _peers.Add(new IPEndPoint(IPAddress.Parse(peer["ip"].ValueString), Convert.ToInt32(peer["port"].ValueInteger)));
-                                                        }
-                                                        break;
-                                                }
-                                                break;
-
-                                            case "peers_ipv6":
-                                            case "peers6":
-                                                switch (item.Value.Type)
-                                                {
-                                                    case BencodingType.String:
-                                                        ParseCompactPeersIPv6(item.Value.Value as byte[], _peers);
-                                                        break;
-                                                }
-                                                break;
-
-                                            case "interval":
-                                                if (item.Value.Type == BencodingType.Integer)
-                                                    _interval = Convert.ToInt32(item.Value.Value);
-                                                break;
-
-                                            case "min interval":
-                                                if (item.Value.Type == BencodingType.Integer)
-                                                    _minInterval = Convert.ToInt32(item.Value.Value);
-                                                break;
+                                            _peers.Add(new IPEndPoint(IPAddress.Parse(peer["ip"].ValueString), Convert.ToInt32(peer["port"].ValueInteger)));
                                         }
-                                    }
-                                    break;
+                                        break;
+                                }
+                                break;
 
-                                default:
-                                    throw new TrackerClientException("Invalid data received from tracker. Expected bencoded dictionary.");
-                            }
-                            break;
+                            case "peers_ipv6":
+                            case "peers6":
+                                switch (item.Value.Type)
+                                {
+                                    case BencodingType.String:
+                                        ParseCompactPeersIPv6(item.Value.Value as byte[], _peers);
+                                        break;
+                                }
+                                break;
+
+                            case "interval":
+                                if (item.Value.Type == BencodingType.Integer)
+                                    _interval = Convert.ToInt32(item.Value.Value);
+                                break;
+
+                            case "min interval":
+                                if (item.Value.Type == BencodingType.Integer)
+                                    _minInterval = Convert.ToInt32(item.Value.Value);
+                                break;
+
+                            case "complete":
+                                if (item.Value.Type == BencodingType.Integer)
+                                    _seeders = Convert.ToInt32(item.Value.Value);
+                                break;
+
+                            case "incomplete":
+                                if (item.Value.Type == BencodingType.Integer)
+                                    _leachers = Convert.ToInt32(item.Value.Value);
+                                break;
+                        }
                     }
                 }
             }
+        }
+
+        static DecompressionMethods GetDecompressionMethods(string acceptEncoding)
+        {
+            if (string.IsNullOrEmpty(acceptEncoding))
+                return DecompressionMethods.None;
+
+            DecompressionMethods methods = DecompressionMethods.None;
+
+            if (acceptEncoding.Contains("gzip", StringComparison.OrdinalIgnoreCase))
+                methods |= DecompressionMethods.GZip;
+
+            if (acceptEncoding.Contains("deflate", StringComparison.OrdinalIgnoreCase))
+                methods |= DecompressionMethods.Deflate;
+
+            if (acceptEncoding.Contains("br", StringComparison.OrdinalIgnoreCase))
+                methods |= DecompressionMethods.Brotli;
+
+            return methods;
+        }
+
+        static string PercentEncode(byte[] data)
+        {
+            StringBuilder sb = new StringBuilder(data.Length * 3);
+
+            foreach (byte value in data)
+                sb.Append('%').Append(value.ToString("X2"));
+
+            return sb.ToString();
         }
 
         #endregion

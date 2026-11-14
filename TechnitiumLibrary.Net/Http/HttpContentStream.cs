@@ -80,6 +80,18 @@ namespace TechnitiumLibrary.Net.Http
             return 0;
         }
 
+        internal void ReturnUnused()
+        {
+            int count = _length - _offset;
+            if (count < 1)
+                return;
+
+            if (_baseStream is HttpBufferedStream bufferedStream)
+                bufferedStream.Unread(_buffer, _offset, count);
+
+            _offset = _length;
+        }
+
         #endregion
 
         #region stream support
@@ -150,7 +162,12 @@ namespace TechnitiumLibrary.Net.Http
 
                 bytesRead = _baseStream.Read(_buffer, 0, bytesRemaining);
                 if (bytesRead < 1)
+                {
+                    if ((_contentLength > -1) && (_totalBytesRead < _contentLength))
+                        throw new EndOfStreamException();
+
                     return bytesRead;
+                }
 
                 _offset = 0;
                 _length = bytesRead;
@@ -187,7 +204,12 @@ namespace TechnitiumLibrary.Net.Http
 
                 bytesRead = await _baseStream.ReadAsync(_buffer, 0, bytesRemaining, cancellationToken);
                 if (bytesRead < 1)
+                {
+                    if ((_contentLength > -1) && (_totalBytesRead < _contentLength))
+                        throw new EndOfStreamException();
+
                     return bytesRead;
+                }
 
                 _offset = 0;
                 _length = bytesRead;

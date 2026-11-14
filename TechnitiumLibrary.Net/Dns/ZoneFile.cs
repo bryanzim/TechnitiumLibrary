@@ -294,7 +294,12 @@ namespace TechnitiumLibrary.Net.Dns
             return ttl;
         }
 
-        internal async Task<string> PopItemAsync(bool newEntry = false)
+        internal Task<string> PopCharacterStringAsync()
+        {
+            return PopItemAsync(false, true);
+        }
+
+        internal async Task<string> PopItemAsync(bool newEntry = false, bool characterString = false)
         {
             if (newEntry)
             {
@@ -310,7 +315,7 @@ namespace TechnitiumLibrary.Net.Dns
                             break;
                         }
 
-                        string word = PopWord(ref _line);
+                        string word = PopWord(ref _line, out _);
                         if (word is null)
                         {
                             _line = await _tR.ReadLineAsync();
@@ -388,7 +393,7 @@ namespace TechnitiumLibrary.Net.Dns
                     continue;
                 }
 
-                string word = PopWord(ref _line);
+                string word = PopWord(ref _line, out bool quoted);
                 if (word is null)
                 {
                     if (!_multiLine)
@@ -397,6 +402,9 @@ namespace TechnitiumLibrary.Net.Dns
                     _line = null;
                     continue;
                 }
+
+                if (characterString && !quoted)
+                    word = UnescapeCharacterString(word);
 
                 return word;
             }
@@ -633,8 +641,9 @@ namespace TechnitiumLibrary.Net.Dns
             return null;
         }
 
-        private static string PopWord(ref string line)
+        private static string PopWord(ref string line, out bool quoted)
         {
+            quoted = false;
             line = line.TrimStart(_trimSeperator);
 
             if (line.Length == 0)
@@ -642,6 +651,8 @@ namespace TechnitiumLibrary.Net.Dns
 
             if (line.StartsWith('\"'))
             {
+                quoted = true;
+
                 int i = 0;
 
                 do
@@ -650,7 +661,11 @@ namespace TechnitiumLibrary.Net.Dns
                     if (i < 0)
                         throw new FormatException("Closing double quotes are missing.");
 
-                    if (line[i - 1] != '\\')
+                    int slashes = 0;
+                    for (int j = i - 1; (j > 0) && (line[j] == '\\'); j--)
+                        slashes++;
+
+                    if ((slashes % 2) == 0)
                         break;
                 }
                 while (true);
@@ -658,26 +673,127 @@ namespace TechnitiumLibrary.Net.Dns
                 string word = line.Substring(1, i - 1);
                 line = line.Substring(i + 1);
 
-                return word;
+                return UnescapeCharacterString(word);
             }
             else
             {
-                int i = line.IndexOfAny(_popSeperator);
-                string word;
+                int i = 0;
 
-                if (i < 0)
+                while (i < line.Length)
                 {
-                    word = line;
-                    line = "";
-                }
-                else
-                {
-                    word = line.Substring(0, i);
-                    line = line.Substring(i);
+                    if (line[i] == '"')
+                    {
+                        int quote = i;
+
+                        do
+                        {
+                            quote = line.IndexOf('"', quote + 1);
+                            if (quote < 0)
+                                throw new FormatException("Closing double quotes are missing.");
+
+                            int slashes = 0;
+                            for (int j = quote - 1; (j > i) && (line[j] == '\\'); j--)
+                                slashes++;
+
+                            if ((slashes % 2) == 0)
+                                break;
+                        }
+                        while (true);
+
+                        i = quote + 1;
+                        continue;
+                    }
+
+                    if (Array.IndexOf(_popSeperator, line[i]) >= 0)
+                        break;
+
+                    i++;
                 }
 
+                string word = line.Substring(0, i);
+                line = line.Substring(i);
                 return word;
             }
+        }
+
+        internal static string DecodeCharacterStringToken(string value)
+        {
+            if ((value.Length == 0) || (value[0] != '"'))
+                return UnescapeCharacterString(value);
+
+            int i = 0;
+
+            do
+            {
+                i = value.IndexOf('"', i + 1);
+                if (i < 0)
+                    throw new FormatException("Closing double quotes are missing.");
+
+                int slashes = 0;
+                for (int j = i - 1; (j > 0) && (value[j] == '\\'); j--)
+                    slashes++;
+
+                if ((slashes % 2) == 0)
+                    break;
+            }
+            while (true);
+
+            if (i != (value.Length - 1))
+                throw new FormatException("Zone file character string has text after the closing quote.");
+
+            return UnescapeCharacterString(value.Substring(1, i - 1));
+        }
+
+        internal static byte[] DecodeCharacterStringOctets(string value)
+        {
+            string decoded = DecodeCharacterStringToken(value);
+            byte[] octets = new byte[decoded.Length];
+
+            for (int i = 0; i < decoded.Length; i++)
+            {
+                if (decoded[i] > 255)
+                    throw new FormatException("Zone file character string contains a character outside the octet range.");
+
+                octets[i] = (byte)decoded[i];
+            }
+
+            return octets;
+        }
+
+        internal static string UnescapeCharacterString(string value)
+        {
+            StringBuilder result = new StringBuilder(value.Length);
+
+            for (int i = 0; i < value.Length; i++)
+            {
+                if (value[i] != '\\')
+                {
+                    result.Append(value[i]);
+                    continue;
+                }
+
+                if (i + 1 >= value.Length)
+                    throw new FormatException("Zone file escape is missing the escaped character.");
+
+                if ((value[i + 1] >= '0') && (value[i + 1] <= '9'))
+                {
+                    if ((i + 3 >= value.Length) || (value[i + 2] < '0') || (value[i + 2] > '9') || (value[i + 3] < '0') || (value[i + 3] > '9'))
+                        throw new FormatException("Zone file decimal escape must be three digits.");
+
+                    int octet = ((value[i + 1] - '0') * 100) + ((value[i + 2] - '0') * 10) + (value[i + 3] - '0');
+                    if (octet > 255)
+                        throw new FormatException("Zone file escape is outside the octet range: \\" + octet.ToString());
+
+                    result.Append((char)octet);
+                    i += 3;
+                    continue;
+                }
+
+                result.Append(value[i + 1]);
+                i++;
+            }
+
+            return result.ToString();
         }
 
         private async Task<DnsResourceRecordData> ParseRecordDataAsync(DnsResourceRecordType type)

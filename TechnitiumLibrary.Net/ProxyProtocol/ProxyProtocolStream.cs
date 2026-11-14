@@ -144,7 +144,7 @@ namespace TechnitiumLibrary.Net.ProxyProtocol
                 switch (proxy._protocolVersion)
                 {
                     case 1:
-                        for (int i = proxy._offset; i < proxy._length - 1; i++)
+                        for (int i = 0; i < proxy._length - 1; i++)
                         {
                             if (
                                 (proxy._buffer[i] == '\r') &&
@@ -162,7 +162,7 @@ namespace TechnitiumLibrary.Net.ProxyProtocol
 
                     case 2:
                         int addressLength = proxy._buffer[14] << 8 | proxy._buffer[15];
-                        if (proxy._length < addressLength)
+                        if (proxy._length < 16 + addressLength)
                             break;
 
                         proxy.ParseVersion2();
@@ -235,7 +235,8 @@ namespace TechnitiumLibrary.Net.ProxyProtocol
 
                 case "UNKNOWN":
                     _addressFamily = AddressFamily.Unknown;
-                    break;
+                    _socketType = SocketType.Stream;
+                    return;
 
                 default:
                     throw new NotSupportedException("PROXY protocol address family is not supported: " + addressFamily);

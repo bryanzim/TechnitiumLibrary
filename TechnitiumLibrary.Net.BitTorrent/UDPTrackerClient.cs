@@ -60,9 +60,9 @@ namespace TechnitiumLibrary.Net.BitTorrent
             int responseLength;
 
             if (_proxy == null)
-                responseLength = await udpSocket.UdpQueryAsync(request, response, (IPEndPoint)trackerEP, TIMEOUT, 3, true);
+                responseLength = await udpSocket.UdpQueryAsync(request, response, (IPEndPoint)trackerEP, TIMEOUT, 3, true, received => IsTrackerDatagram(response, received, transactionID, 0));
             else
-                responseLength = await proxyHandler.UdpQueryAsync(request, response, trackerEP, TIMEOUT, 3, true);
+                responseLength = await proxyHandler.UdpQueryAsync(request, response, trackerEP, TIMEOUT, 3, true, received => IsTrackerDatagram(response, received, transactionID, 0));
 
             //check response length
             if (responseLength < 16)
@@ -130,7 +130,9 @@ namespace TechnitiumLibrary.Net.BitTorrent
                 Buffer.BlockCopy(_clientID.ClientKey, 0, request, 88, 4);
 
                 //num_want
-                Buffer.BlockCopy(BitConverter.GetBytes(_clientID.NumWant), 0, request, 92, 4);
+                byte[] numWant = BitConverter.GetBytes(_clientID.NumWant);
+                Array.Reverse(numWant);
+                Buffer.BlockCopy(numWant, 0, request, 92, 4);
 
                 //port 16bit
                 byte[] portBuffer = BitConverter.GetBytes(clientEP.Port);
@@ -142,9 +144,9 @@ namespace TechnitiumLibrary.Net.BitTorrent
             int bytesReceived;
 
             if (_proxy == null)
-                bytesReceived = await udpSocket.UdpQueryAsync(request, buffer, (IPEndPoint)trackerEP, TIMEOUT, 3, true);
+                bytesReceived = await udpSocket.UdpQueryAsync(request, buffer, (IPEndPoint)trackerEP, TIMEOUT, 3, true, received => IsTrackerDatagram(buffer, received, transactionID, 1));
             else
-                bytesReceived = await proxyHandler.UdpQueryAsync(request, buffer, trackerEP, TIMEOUT, 3, true);
+                bytesReceived = await proxyHandler.UdpQueryAsync(request, buffer, trackerEP, TIMEOUT, 3, true, received => IsTrackerDatagram(buffer, received, transactionID, 1));
 
             //check response length
             if (bytesReceived < 20)
@@ -162,6 +164,28 @@ namespace TechnitiumLibrary.Net.BitTorrent
             byte[] response = new byte[bytesReceived];
             Buffer.BlockCopy(buffer, 0, response, 0, bytesReceived);
             return response;
+        }
+
+        static bool IsTrackerDatagram(byte[] response, int received, byte[] transactionID, byte expectedAction)
+        {
+            if (received < 8)
+                return false;
+
+            for (int j = 0; j < 4; j++)
+            {
+                if (response[4 + j] != transactionID[j])
+                    return false;
+            }
+
+            return (response[3] == expectedAction) || (response[3] == 3);
+        }
+
+        static bool AnnouncePeersAreIPv6(Socket udpSocket, SocksProxyUdpAssociateHandler proxyHandler)
+        {
+            if (proxyHandler != null)
+                return (proxyHandler.LastRemoteEndPoint is IPEndPoint trackerEndPoint) && (trackerEndPoint.AddressFamily == AddressFamily.InterNetworkV6);
+
+            return (udpSocket != null) && (udpSocket.AddressFamily == AddressFamily.InterNetworkV6);
         }
 
         private static void ParsePeersIPv4(byte[] response, int responseLength, List<IPEndPoint> peers)
@@ -281,22 +305,10 @@ namespace TechnitiumLibrary.Net.BitTorrent
 
                         _peers.Clear();
 
-                        if (_proxy == null)
-                        {
-                            if (udpSocket.AddressFamily == AddressFamily.InterNetworkV6)
-                                ParsePeersIPv6(announceResponse, announceResponse.Length, _peers);
-                            else
-                                ParsePeersIPv4(announceResponse, announceResponse.Length, _peers);
-                        }
+                        if (AnnouncePeersAreIPv6(udpSocket, proxyHandler))
+                            ParsePeersIPv6(announceResponse, announceResponse.Length, _peers);
                         else
-                        {
-                            int x = (announceResponse.Length - 26) % 6;
-
-                            if (x == 0)
-                                ParsePeersIPv4(announceResponse, announceResponse.Length, _peers);
-                            else
-                                ParsePeersIPv6(announceResponse, announceResponse.Length, _peers);
-                        }
+                            ParsePeersIPv4(announceResponse, announceResponse.Length, _peers);
 
                         return;
                     }
@@ -304,6 +316,8 @@ namespace TechnitiumLibrary.Net.BitTorrent
                     {
                         if (ex.ErrorCode != (int)SocketError.TimedOut)
                             throw new TrackerClientException(ex.Message, ex);
+
+                        _connectionId = null;
                     }
                 }
 

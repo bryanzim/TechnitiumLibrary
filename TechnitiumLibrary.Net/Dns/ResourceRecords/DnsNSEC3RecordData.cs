@@ -125,6 +125,31 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
             string nextCloserName;
             string closestEncloserZoneName;
             bool foundClosestEncloserProof;
+            byte[] closestEncloserSalt = null;
+            ushort closestEncloserIterations = 0;
+
+            async Task<string> HashNsec3NameAsync(DnsNSEC3RecordData nsec3, string name)
+            {
+                if (context is not null)
+                {
+                    if (context.MaxNsec3Hashes < 1)
+                    {
+                        if (context.MaxNsec3Suspensions <= 1)
+                            return null;
+
+                        context.DecrementMaxNsec3Suspensions();
+
+                        //suspend current task by yielding
+                        await Task.Yield();
+
+                        context.ResetMaxNsec3Hashes();
+                    }
+
+                    context.DecrementMaxNsec3Hashes();
+                }
+
+                return nsec3.ComputeHashedOwnerName(name);
+            }
 
             if (wildcardAnswerValidation)
             {
@@ -145,8 +170,6 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
 
             while (!foundClosestEncloserProof)
             {
-                string hashedClosestEncloser = null;
-
                 foreach (DnsResourceRecord nsec3Record in nsec3Records)
                 {
                     if (nsec3Record.Type != DnsResourceRecordType.NSEC3)
@@ -157,37 +180,17 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
                         return DnssecProofOfNonExistence.UnsupportedNSEC3IterationsValue;
 
                     string nsec3ZoneName = GetHashedOwnerNameZoneNameFrom(nsec3Record.Name);
-
+                    string hashedClosestEncloser = await HashNsec3NameAsync(nsec3, closestEncloser);
                     if (hashedClosestEncloser is null)
-                    {
-                        if (context is not null)
-                        {
-                            if (context.MaxNsec3Hashes < 1)
-                            {
-                                if (context.MaxNsec3Suspensions <= 1)
-                                    return DnssecProofOfNonExistence.TooManyNsec3HashOperations;
-
-                                context.DecrementMaxNsec3Suspensions();
-
-                                //suspend current task by yielding
-                                await Task.Yield();
-
-                                context.ResetMaxNsec3Hashes();
-                            }
-
-                            context.DecrementMaxNsec3Hashes();
-                        }
-
-                        hashedClosestEncloser = nsec3.ComputeHashedOwnerName(closestEncloser);
-                    }
+                        return DnssecProofOfNonExistence.TooManyNsec3HashOperations;
 
                     string hashedClosestEncloserDomain = hashedClosestEncloser + (nsec3ZoneName.Length > 0 ? "." + nsec3ZoneName : "");
 
-                    if (nsec3Record.Name.Equals(hashedClosestEncloserDomain, StringComparison.OrdinalIgnoreCase))
+                    if (DnsDatagram.EqualsIgnoreCaseAscii(nsec3Record.Name, hashedClosestEncloserDomain))
                     {
                         //found proof for closest encloser
 
-                        if (closestEncloser.Equals(domain, StringComparison.OrdinalIgnoreCase))
+                        if (DnsDatagram.EqualsIgnoreCaseAscii(closestEncloser, domain))
                         {
                             //domain matches exactly with closest encloser
 
@@ -199,6 +202,8 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
                         }
 
                         closestEncloserZoneName = nsec3ZoneName;
+                        closestEncloserSalt = nsec3.Salt;
+                        closestEncloserIterations = nsec3.Iterations;
                         foundClosestEncloserProof = true;
                         break;
                     }
@@ -215,7 +220,6 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
 
             //find proof for next closer name
             bool foundNextCloserNameProof = false;
-            string hashedNextCloserName = null;
 
             foreach (DnsResourceRecord nsec3Record in nsec3Records)
             {
@@ -224,10 +228,25 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
 
                 DnsNSEC3RecordData nsec3 = nsec3Record.RDATA as DnsNSEC3RecordData;
                 string nsec3ZoneName = GetHashedOwnerNameZoneNameFrom(nsec3Record.Name);
-                string nextHashedOwnerName = nsec3._nextHashedOwnerName + (nsec3ZoneName.Length > 0 ? "." + nsec3ZoneName : "");
 
+                if ((closestEncloserZoneName is not null) && !DnsDatagram.EqualsIgnoreCaseAscii(nsec3ZoneName, closestEncloserZoneName))
+                    continue;
+
+                if (closestEncloserSalt is not null)
+                {
+                    if (nsec3.Iterations != closestEncloserIterations)
+                        continue;
+
+                    if ((nsec3.Salt is null) || !nsec3.Salt.AsSpan().SequenceEqual(closestEncloserSalt))
+                        continue;
+                }
+
+                string nextHashedOwnerName = nsec3._nextHashedOwnerName + (nsec3ZoneName.Length > 0 ? "." + nsec3ZoneName : "");
+                string hashedNextCloserName = await HashNsec3NameAsync(nsec3, nextCloserName);
                 if (hashedNextCloserName is null)
-                    hashedNextCloserName = nsec3.ComputeHashedOwnerName(nextCloserName) + (closestEncloserZoneName.Length > 0 ? "." + closestEncloserZoneName : "");
+                    return DnssecProofOfNonExistence.TooManyNsec3HashOperations;
+
+                hashedNextCloserName += nsec3ZoneName.Length > 0 ? "." + nsec3ZoneName : "";
 
                 if (DnsNSECRecordData.IsDomainCovered(nsec3Record.Name, nextHashedOwnerName, hashedNextCloserName))
                 {
@@ -265,7 +284,7 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
                 if (hashedWildcardDomainName is null)
                     hashedWildcardDomainName = nsec3.ComputeHashedOwnerName(wildcardDomain) + (closestEncloserZoneName.Length > 0 ? "." + closestEncloserZoneName : "");
 
-                if (nsec3Record.Name.Equals(hashedWildcardDomainName, StringComparison.OrdinalIgnoreCase))
+                if (DnsDatagram.EqualsIgnoreCaseAscii(nsec3Record.Name, hashedWildcardDomainName))
                 {
                     //found proof for wildcard domain
 
@@ -353,7 +372,7 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
 
                     using (MemoryStream mS = new MemoryStream(Math.Max(ownerName.Length, SHA1.HashSizeInBytes)))
                     {
-                        DnsDatagram.SerializeDomainName(ownerName.ToLowerInvariant(), mS);
+                        DnsDatagram.SerializeDomainName(DnsDatagram.ToLowerInvariantAscii(ownerName), mS);
                         mS.Write(salt);
 
                         mS.Position = 0;
@@ -555,7 +574,17 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
 
         public override int GetHashCode()
         {
-            return HashCode.Combine(_hashAlgorithm, _flags, _iterations, _salt.GetArrayHashCode(), _nextHashedOwnerNameValue.GetArrayHashCode(), _types);
+            HashCode hash = new HashCode();
+            hash.Add(_hashAlgorithm);
+            hash.Add(_flags);
+            hash.Add(_iterations);
+            hash.Add(_salt.GetArrayHashCode());
+            hash.Add(_nextHashedOwnerNameValue.GetArrayHashCode());
+
+            foreach (DnsResourceRecordType type in _types)
+                hash.Add(type);
+
+            return hash.ToHashCode();
         }
 
         public override void SerializeTo(Utf8JsonWriter jsonWriter)

@@ -83,17 +83,32 @@ namespace TechnitiumLibrary.IO
             {
                 try
                 {
+                    PipeStream? other = null;
+
                     lock (_bufferLock)
                     {
                         if (_disposed)
                             return;
 
                         _disposed = true;
-
-                        Monitor.Pulse(_bufferLock);
+                        Monitor.PulseAll(_bufferLock);
+                        other = _otherPipe;
+                        _otherPipe = null;
                     }
 
-                    _otherPipe?.Dispose();
+                    if (other != null)
+                    {
+                        lock (other._bufferLock)
+                        {
+                            other._otherPipe = null;
+
+                            if (!other._disposed)
+                            {
+                                other._disposed = true;
+                                Monitor.PulseAll(other._bufferLock);
+                            }
+                        }
+                    }
                 }
                 finally
                 {
@@ -194,24 +209,48 @@ namespace TechnitiumLibrary.IO
 
             public override void Write(byte[] buffer, int offset, int count)
             {
-                if (count > 0)
+                if (count < 1)
+                    return;
+
+                lock (_bufferLock)
                 {
-                    lock (_bufferLock)
+                    int written = 0;
+
+                    while (written < count)
                     {
                         if (_disposed)
                             throw new ObjectDisposedException("DataStream");
 
-                        while (_length + count > _buffer.Length)
+                        int space = _buffer.Length - _length;
+                        if (space < 1)
                         {
-                            if (!Monitor.Wait(_bufferLock, _writeTimeout))
-                                throw new IOException("Write timed out.");
+                            if (_position > 0)
+                            {
+                                int unread = _length - _position;
+                                if (unread > 0)
+                                    Buffer.BlockCopy(_buffer, _position, _buffer, 0, unread);
 
-                            if (_disposed)
-                                throw new ObjectDisposedException("DataStream");
+                                _position = 0;
+                                _length = unread;
+                                space = _buffer.Length - _length;
+                            }
+
+                            if (space < 1)
+                            {
+                                if (!Monitor.Wait(_bufferLock, _writeTimeout))
+                                    throw new IOException("Write timed out.");
+
+                                continue;
+                            }
                         }
 
-                        Buffer.BlockCopy(buffer, offset, _buffer, _length, count);
-                        _length += count;
+                        int chunk = count - written;
+                        if (chunk > space)
+                            chunk = space;
+
+                        Buffer.BlockCopy(buffer, offset + written, _buffer, _length, chunk);
+                        _length += chunk;
+                        written += chunk;
 
                         Monitor.Pulse(_bufferLock);
                     }
@@ -251,10 +290,9 @@ namespace TechnitiumLibrary.IO
                     {
                         _position = 0;
                         _length = 0;
-
-                        Monitor.Pulse(_bufferLock);
                     }
 
+                    Monitor.Pulse(_bufferLock);
                     return count;
                 }
             }
