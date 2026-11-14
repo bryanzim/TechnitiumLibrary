@@ -66,19 +66,19 @@ namespace TechnitiumLibrary.Security.Cryptography
                     switch (_kdHashAlgo)
                     {
                         case KeyAgreementKeyDerivationHashAlgorithm.SHA256:
-                            using (HashAlgorithm hash = HashAlgorithm.Create("SHA256"))
+                            using (HashAlgorithm hash = HashAlgorithms.Create("SHA256"))
                             {
                                 return hash.ComputeHash(ComputeKey(otherPartyPublicKey));
                             }
 
                         case KeyAgreementKeyDerivationHashAlgorithm.SHA384:
-                            using (HashAlgorithm hash = HashAlgorithm.Create("SHA384"))
+                            using (HashAlgorithm hash = HashAlgorithms.Create("SHA384"))
                             {
                                 return hash.ComputeHash(ComputeKey(otherPartyPublicKey));
                             }
 
                         case KeyAgreementKeyDerivationHashAlgorithm.SHA512:
-                            using (HashAlgorithm hash = HashAlgorithm.Create("SHA512"))
+                            using (HashAlgorithm hash = HashAlgorithms.Create("SHA512"))
                             {
                                 return hash.ComputeHash(ComputeKey(otherPartyPublicKey));
                             }

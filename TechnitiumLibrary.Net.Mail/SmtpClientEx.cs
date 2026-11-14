@@ -59,8 +59,11 @@ namespace TechnitiumLibrary.Net.Mail
 
         static SmtpClientEx()
         {
+            // System.Net.Mail.SmtpClient still reads this callback and passes it to SslStream.
+#pragma warning disable SYSLIB0014
             _existingServerCertificateValidationCallback = ServicePointManager.ServerCertificateValidationCallback;
             ServicePointManager.ServerCertificateValidationCallback = ServerCertificateValidationCallback;
+#pragma warning restore SYSLIB0014
         }
 
         public SmtpClientEx()

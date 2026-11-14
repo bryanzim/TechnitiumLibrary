@@ -472,7 +472,8 @@ namespace TechnitiumLibrary.Security.Cryptography
                 mS.Position = 0;
 
                 _lastHashAlgo = hashAlgorithm;
-                _lastHash = HashAlgorithm.Create(hashAlgorithm).ComputeHash(mS);
+                using (HashAlgorithm hash = HashAlgorithms.Create(hashAlgorithm))
+                    _lastHash = hash.ComputeHash(mS);
 
                 return _lastHash;
             }
