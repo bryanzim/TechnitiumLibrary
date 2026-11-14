@@ -20,6 +20,8 @@
 
 	<ItemGroup>
 		<ProjectReference Include="..\TechnitiumLibrary.Net\TechnitiumLibrary.Net.csproj" />
+		<ProjectReference Include="..\TechnitiumLibrary\TechnitiumLibrary.csproj" />
+		<ProjectReference Include="..\TechnitiumLibrary.Security.OTP\TechnitiumLibrary.Security.OTP.csproj" />
 	</ItemGroup>
 
 </Project>

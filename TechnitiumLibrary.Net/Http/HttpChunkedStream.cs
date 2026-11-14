@@ -261,6 +261,7 @@ namespace TechnitiumLibrary.Net.Http
             byte[] hex = new byte[16];
             int hexLength = 0;
             bool extension = false;
+            bool carriageReturn = false;
             byte[] one = new byte[1];
 
             while (true)
@@ -268,7 +269,7 @@ namespace TechnitiumLibrary.Net.Http
                 if (await _baseStream.ReadAsync(one, 0, 1, cancellationToken) < 1)
                     throw new EndOfStreamException();
 
-                if (AcceptChunkSizeByte(one[0], hex, ref hexLength, ref extension))
+                if (AcceptChunkSizeByte(one[0], hex, ref hexLength, ref extension, ref carriageReturn))
                     break;
             }
 
@@ -280,17 +281,18 @@ namespace TechnitiumLibrary.Net.Http
             byte[] hex = new byte[16];
             int hexLength = 0;
             bool extension = false;
+            bool carriageReturn = false;
 
             while (true)
             {
-                if (AcceptChunkSizeByte(readByte(), hex, ref hexLength, ref extension))
+                if (AcceptChunkSizeByte(readByte(), hex, ref hexLength, ref extension, ref carriageReturn))
                     break;
             }
 
             return FinishChunkLength(hex, hexLength);
         }
 
-        static bool AcceptChunkSizeByte(byte value, byte[] hex, ref int hexLength, ref bool extension)
+        static bool AcceptChunkSizeByte(byte value, byte[] hex, ref int hexLength, ref bool extension, ref bool carriageReturn)
         {
             switch (value)
             {
@@ -298,15 +300,25 @@ namespace TechnitiumLibrary.Net.Http
                     return true;
 
                 case 13: //CR
+                    if (carriageReturn)
+                        throw new HttpRequestException("Chunk size line is not terminated.");
+
+                    carriageReturn = true;
                     return false;
 
                 case (byte)';':
                 case (byte)' ':
                 case (byte)'\t':
+                    if (carriageReturn)
+                        throw new HttpRequestException("Chunk size line is not terminated.");
+
                     extension = true;
                     return false;
 
                 default:
+                    if (carriageReturn)
+                        throw new HttpRequestException("Chunk size line is not terminated.");
+
                     if (extension)
                         return false;
 

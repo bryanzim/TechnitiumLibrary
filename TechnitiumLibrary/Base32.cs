@@ -177,8 +177,36 @@ namespace TechnitiumLibrary
 
             int payloadLength = data.Length - paddingCount;
             int remainder = payloadLength % 8;
-            if ((remainder == 1) || (remainder == 3) || (remainder == 6))
-                throw new ArgumentException("The string is not a valid base32 string.", nameof(data));
+            int expectedPadding;
+
+            switch (remainder)
+            {
+                case 0:
+                    expectedPadding = 0;
+                    break;
+
+                case 2:
+                    expectedPadding = 6;
+                    break;
+
+                case 4:
+                    expectedPadding = 4;
+                    break;
+
+                case 5:
+                    expectedPadding = 3;
+                    break;
+
+                case 7:
+                    expectedPadding = 1;
+                    break;
+
+                default:
+                    throw new ArgumentException("The string is not a valid base32 string.", nameof(data));
+            }
+
+            if ((paddingCount != 0) && (paddingCount != expectedPadding))
+                throw new ArgumentException("The string is not a valid base32 string or has invalid padding.", nameof(data));
 
             int decodedLength;
 

@@ -55,7 +55,7 @@ namespace TechnitiumLibrary.Security.OTP
             if ((digits < 6) || (digits > 8))
                 throw new ArgumentOutOfRangeException(nameof(digits), "The digits value must be in 6-8 range.");
 
-            if (period < 0)
+            if (period < 1)
                 throw new ArgumentOutOfRangeException(nameof(period), "The period value must be a positive integer.");
 
             _type = type;
@@ -119,7 +119,12 @@ namespace TechnitiumLibrary.Security.OTP
 
             foreach (string queryPart in queryParts)
             {
+                if (queryPart.Length == 0)
+                    continue;
+
                 string[] keyValue = queryPart.Split('=', 2);
+                if (keyValue.Length != 2)
+                    throw new ArgumentException("Failed to generate OTP: the key URI query parameter is invalid.");
 
                 switch (keyValue[0].ToLowerInvariant())
                 {
@@ -175,12 +180,17 @@ namespace TechnitiumLibrary.Security.OTP
 
         public override string ToString()
         {
-            return "otpauth://" + HttpUtility.UrlEncode(_type) + "/" + HttpUtility.UrlEncode(_issuer) + ":" + HttpUtility.UrlEncode(_accountName) + "?" +
-                "secret=" + HttpUtility.UrlEncode(_secret) +
-                "&issuer=" + HttpUtility.UrlEncode(_issuer) +
-                "&algorithm=" + HttpUtility.UrlEncode(_algorithm) +
+            return "otpauth://" + Encode(_type) + "/" + Encode(_issuer) + ":" + Encode(_accountName) + "?" +
+                "secret=" + Encode(_secret) +
+                "&issuer=" + Encode(_issuer) +
+                "&algorithm=" + Encode(_algorithm) +
                 "&digits=" + _digits +
                 "&period=" + _period;
+        }
+
+        static string Encode(string value)
+        {
+            return Uri.EscapeDataString(value);
         }
 
         #endregion
