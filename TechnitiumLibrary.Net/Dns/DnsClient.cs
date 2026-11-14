@@ -2927,9 +2927,11 @@ namespace TechnitiumLibrary.Net.Dns
                                     {
                                         case DnssecProofOfNonExistence.OptOut:
                                         case DnssecProofOfNonExistence.NxDomain:
-                                        case DnssecProofOfNonExistence.UnsupportedNSEC3IterationsValue:
                                             //record does not exists so wildcard is valid
                                             break;
+
+                                        case DnssecProofOfNonExistence.UnsupportedNSEC3IterationsValue:
+                                            throw new DnsClientResponseDnssecValidationException("DNSSEC validation failed because the NSEC3 iterations value is not supported for owner name: " + rrsigRecord.Name.ToLowerInvariant() + ". " + typeCovered.ToString() + " " + rrsigRecord.Class.ToString(), response);
 
                                         case DnssecProofOfNonExistence.TooManyNsec3HashOperations:
                                             response.AddDnsClientExtendedError(EDnsExtendedDnsErrorCode.TooManyCryptoValidations, "Attack detected! Too many NSEC3 hash operations for " + rrsigRecord.Name.ToLowerInvariant() + ". " + typeCovered.ToString() + " " + rrsigRecord.Class.ToString());
@@ -2972,9 +2974,11 @@ namespace TechnitiumLibrary.Net.Dns
                                             case DnssecProofOfNonExistence.OptOut:
                                             case DnssecProofOfNonExistence.NoData:
                                             case DnssecProofOfNonExistence.InsecureDelegation: //proves no DS record exists
-                                            case DnssecProofOfNonExistence.UnsupportedNSEC3IterationsValue:
                                                 //no data for the type was found
                                                 break;
+
+                                            case DnssecProofOfNonExistence.UnsupportedNSEC3IterationsValue:
+                                                throw new DnsClientResponseDnssecValidationException("DNSSEC validation failed because the NSEC3 iterations value is not supported for owner name: " + qname + ". " + question.Type.ToString() + " " + question.Class.ToString(), response);
 
                                             case DnssecProofOfNonExistence.TooManyNsec3HashOperations:
                                                 response.AddDnsClientExtendedError(EDnsExtendedDnsErrorCode.TooManyCryptoValidations, "Attack detected! Too many NSEC3 hash operations for " + qname + ". " + question.Type.ToString() + " " + question.Class.ToString());
@@ -3054,9 +3058,11 @@ namespace TechnitiumLibrary.Net.Dns
                             {
                                 case DnssecProofOfNonExistence.OptOut:
                                 case DnssecProofOfNonExistence.NxDomain:
-                                case DnssecProofOfNonExistence.UnsupportedNSEC3IterationsValue:
                                     //domain does not exists or could not prove it exists due to opt-opt
                                     break;
+
+                                case DnssecProofOfNonExistence.UnsupportedNSEC3IterationsValue:
+                                    throw new DnsClientResponseDnssecValidationException("DNSSEC validation failed because the NSEC3 iterations value is not supported for owner name: " + qname + ". " + question.Type.ToString() + " " + question.Class.ToString(), response);
 
                                 case DnssecProofOfNonExistence.TooManyNsec3HashOperations:
                                     response.AddDnsClientExtendedError(EDnsExtendedDnsErrorCode.TooManyCryptoValidations, "Attack detected! Too many NSEC3 hash operations for " + qname + ". " + question.Type.ToString() + " " + question.Class.ToString());

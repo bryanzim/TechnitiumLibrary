@@ -72,7 +72,15 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
             if (tagLength < 1)
                 throw new InvalidDataException("CAA tag length must be at least 1.");
 
-            _tag = Encoding.ASCII.GetString(s.ReadExactly(tagLength)).ToLowerInvariant();
+            byte[] tag = s.ReadExactly(tagLength);
+
+            for (int i = 0; i < tag.Length; i++)
+            {
+                if (tag[i] > 0x7F)
+                    throw new DnsClientException("CAA tag must be US-ASCII.");
+            }
+
+            _tag = Encoding.ASCII.GetString(tag).ToLowerInvariant();
             _value = Encoding.Latin1.GetString(s.ReadExactly(_rdLength - tagLength - 2));
         }
 

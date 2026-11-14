@@ -147,7 +147,10 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
 
                 string host = mailAddress.Host;
                 if (DnsClient.IsDomainNameUnicode(host))
+                {
                     host = DnsClient.ConvertDomainNameToAscii(host);
+                    responsiblePerson = mailAddress.User + "@" + host;
+                }
 
                 DnsClient.IsDomainNameValid(host, true);
             }

@@ -42,6 +42,7 @@ namespace TechnitiumLibrary.Net.Dns
 
         string _originDomain;
         uint _defaultTtl;
+        bool _defaultTtlSpecified;
 
         string _line;
         uint _lineNo;
@@ -169,27 +170,37 @@ namespace TechnitiumLibrary.Net.Dns
                     {
                         case 's':
                         case 'S':
-                            ttl += number;
+                            if (!TryAddTtl(ref ttl, number, 1))
+                                return false;
+
                             break;
 
                         case 'm':
                         case 'M':
-                            ttl += number * 60;
+                            if (!TryAddTtl(ref ttl, number, MINUTE))
+                                return false;
+
                             break;
 
                         case 'h':
                         case 'H':
-                            ttl += number * 60 * 60;
+                            if (!TryAddTtl(ref ttl, number, HOUR))
+                                return false;
+
                             break;
 
                         case 'd':
                         case 'D':
-                            ttl += number * 24 * 60 * 60;
+                            if (!TryAddTtl(ref ttl, number, DAY))
+                                return false;
+
                             break;
 
                         case 'w':
                         case 'W':
-                            ttl += number * 7 * 24 * 60 * 60;
+                            if (!TryAddTtl(ref ttl, number, WEEK))
+                                return false;
+
                             break;
 
                         default:
@@ -209,9 +220,20 @@ namespace TechnitiumLibrary.Net.Dns
                 if (!uint.TryParse(strTtl, out uint number))
                     return false;
 
-                ttl += number;
+                if (!TryAddTtl(ref ttl, number, 1))
+                    return false;
             }
 
+            return true;
+        }
+
+        static bool TryAddTtl(ref uint ttl, uint number, uint unitSeconds)
+        {
+            ulong sum = (ulong)ttl + ((ulong)number * unitSeconds);
+            if (sum > uint.MaxValue)
+                return false;
+
+            ttl = (uint)sum;
             return true;
         }
 
@@ -501,6 +523,7 @@ namespace TechnitiumLibrary.Net.Dns
                     if (!TryParseTtl(await PopItemAsync(), out _defaultTtl))
                         throw new FormatException("The zone file parser failed to parse $TTL 'default-ttl' field on line # " + _lineNo + ".");
 
+                    _defaultTtlSpecified = true;
                     continue;
                 }
 
@@ -579,7 +602,7 @@ namespace TechnitiumLibrary.Net.Dns
 
                 if (!ttlRead)
                 {
-                    if (_defaultTtl > 0)
+                    if (_defaultTtlSpecified || (_defaultTtl > 0))
                         ttl = _defaultTtl;
                     else
                         ttl = lastTtl;

@@ -127,6 +127,17 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
             bool foundClosestEncloserProof;
             byte[] closestEncloserSalt = null;
             ushort closestEncloserIterations = 0;
+            DnssecNSEC3HashAlgorithm closestEncloserHashAlgorithm = DnssecNSEC3HashAlgorithm.Unknown;
+            bool unsupportedIterations = false;
+            bool sawSupportedNsec3 = false;
+
+            DnssecProofOfNonExistence NoProof()
+            {
+                if (unsupportedIterations && !sawSupportedNsec3)
+                    return DnssecProofOfNonExistence.UnsupportedNSEC3IterationsValue;
+
+                return DnssecProofOfNonExistence.NoProof;
+            }
 
             async Task<string> HashNsec3NameAsync(DnsNSEC3RecordData nsec3, string name)
             {
@@ -177,7 +188,12 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
 
                     DnsNSEC3RecordData nsec3 = nsec3Record.RDATA as DnsNSEC3RecordData;
                     if (nsec3.Iterations > DnsClient.MAX_NSEC3_ITERATIONS)
-                        return DnssecProofOfNonExistence.UnsupportedNSEC3IterationsValue;
+                    {
+                        unsupportedIterations = true;
+                        continue;
+                    }
+
+                    sawSupportedNsec3 = true;
 
                     string nsec3ZoneName = GetHashedOwnerNameZoneNameFrom(nsec3Record.Name);
                     string hashedClosestEncloser = await HashNsec3NameAsync(nsec3, closestEncloser);
@@ -204,6 +220,7 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
                         closestEncloserZoneName = nsec3ZoneName;
                         closestEncloserSalt = nsec3.Salt;
                         closestEncloserIterations = nsec3.Iterations;
+                        closestEncloserHashAlgorithm = nsec3.HashAlgorithm;
                         foundClosestEncloserProof = true;
                         break;
                     }
@@ -215,7 +232,7 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
                 nextCloserName = closestEncloser;
                 closestEncloser = GetParentZone(closestEncloser);
                 if (closestEncloser is null)
-                    return DnssecProofOfNonExistence.NoProof; //could not find any proof
+                    return NoProof(); //could not find any proof
             }
 
             //find proof for next closer name
@@ -264,7 +281,7 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
             }
 
             if (!foundNextCloserNameProof)
-                return DnssecProofOfNonExistence.NoProof;
+                return NoProof();
 
             //found next closer name proof; so the domain does not exists but there could be a possibility of wildcard that may exist which also needs to be proved as non-existent
 
@@ -279,6 +296,22 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
 
                 DnsNSEC3RecordData nsec3 = nsec3Record.RDATA as DnsNSEC3RecordData;
                 string nsec3ZoneName = GetHashedOwnerNameZoneNameFrom(nsec3Record.Name);
+
+                if ((closestEncloserZoneName is not null) && !DnsDatagram.EqualsIgnoreCaseAscii(nsec3ZoneName, closestEncloserZoneName))
+                    continue;
+
+                if (closestEncloserSalt is not null)
+                {
+                    if (nsec3.HashAlgorithm != closestEncloserHashAlgorithm)
+                        continue;
+
+                    if (nsec3.Iterations != closestEncloserIterations)
+                        continue;
+
+                    if ((nsec3.Salt is null) || !nsec3.Salt.AsSpan().SequenceEqual(closestEncloserSalt))
+                        continue;
+                }
+
                 string nextHashedOwnerName = nsec3._nextHashedOwnerName + (nsec3ZoneName.Length > 0 ? "." + nsec3ZoneName : "");
 
                 if (hashedWildcardDomainName is null)
@@ -303,7 +336,7 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
                     {
                         //there is opt-out so there could be a wildcard domain
                         //response failed to prove that the domain does not exists since a wildcard MAY exists
-                        return DnssecProofOfNonExistence.NoProof;
+                        return NoProof();
                     }
 
                     //no opt-out so wildcard domain does not exists
@@ -313,7 +346,7 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
             }
 
             //found no proof
-            return DnssecProofOfNonExistence.NoProof;
+            return NoProof();
         }
 
         private DnssecProofOfNonExistence GetProofOfNonExistenceFromRecordTypes(DnsResourceRecordType checkType)
