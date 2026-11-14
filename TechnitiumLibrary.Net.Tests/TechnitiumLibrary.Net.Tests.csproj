@@ -22,6 +22,11 @@
 		<ProjectReference Include="..\TechnitiumLibrary.Net\TechnitiumLibrary.Net.csproj" />
 		<ProjectReference Include="..\TechnitiumLibrary\TechnitiumLibrary.csproj" />
 		<ProjectReference Include="..\TechnitiumLibrary.Security.OTP\TechnitiumLibrary.Security.OTP.csproj" />
+		<ProjectReference Include="..\TechnitiumLibrary.IO\TechnitiumLibrary.IO.csproj" />
+		<ProjectReference Include="..\TechnitiumLibrary.Security.Cryptography\TechnitiumLibrary.Security.Cryptography.csproj" />
+		<ProjectReference Include="..\TechnitiumLibrary.Net.BitTorrent\TechnitiumLibrary.Net.BitTorrent.csproj" />
+		<ProjectReference Include="..\TechnitiumLibrary.Net.Mail\TechnitiumLibrary.Net.Mail.csproj" />
+		<ProjectReference Include="..\TechnitiumLibrary.Net.UPnP\TechnitiumLibrary.Net.UPnP.csproj" />
 	</ItemGroup>
 
 </Project>
