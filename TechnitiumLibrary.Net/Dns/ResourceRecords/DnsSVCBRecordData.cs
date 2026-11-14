@@ -914,7 +914,26 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
             if (keys.Count < 1)
                 throw new ArgumentException("Missing param value for 'mandatory' key.");
 
-            _keys = keys;
+            DnsSvcParamKey[] sorted = new DnsSvcParamKey[keys.Count];
+
+            for (int i = 0; i < keys.Count; i++)
+                sorted[i] = keys[i];
+
+            Array.Sort(sorted, delegate (DnsSvcParamKey x, DnsSvcParamKey y)
+            {
+                return ((ushort)x).CompareTo((ushort)y);
+            });
+
+            for (int i = 0; i < sorted.Length; i++)
+            {
+                if (sorted[i] == DnsSvcParamKey.Mandatory)
+                    throw new ArgumentException("SVCB mandatory list must not include the mandatory key.");
+
+                if ((i > 0) && ((ushort)sorted[i] <= (ushort)sorted[i - 1]))
+                    throw new ArgumentException("SVCB mandatory list contains a repeated key.");
+            }
+
+            _keys = sorted;
         }
 
         public DnsSvcMandatoryParamValue(Stream s)
