@@ -162,6 +162,21 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
                 return nsec3.ComputeHashedOwnerName(name);
             }
 
+            bool TryUseSupportedNsec3(DnsNSEC3RecordData nsec3)
+            {
+                if (nsec3.HashAlgorithm != DnssecNSEC3HashAlgorithm.SHA1)
+                    return false;
+
+                if (nsec3.Iterations > DnsClient.MAX_NSEC3_ITERATIONS)
+                {
+                    unsupportedIterations = true;
+                    return false;
+                }
+
+                sawSupportedNsec3 = true;
+                return true;
+            }
+
             if (wildcardAnswerValidation)
             {
                 //wildcard answer case
@@ -187,13 +202,8 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
                         continue;
 
                     DnsNSEC3RecordData nsec3 = nsec3Record.RDATA as DnsNSEC3RecordData;
-                    if (nsec3.Iterations > DnsClient.MAX_NSEC3_ITERATIONS)
-                    {
-                        unsupportedIterations = true;
+                    if (!TryUseSupportedNsec3(nsec3))
                         continue;
-                    }
-
-                    sawSupportedNsec3 = true;
 
                     string nsec3ZoneName = GetHashedOwnerNameZoneNameFrom(nsec3Record.Name);
                     string hashedClosestEncloser = await HashNsec3NameAsync(nsec3, closestEncloser);
@@ -244,6 +254,9 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
                     continue;
 
                 DnsNSEC3RecordData nsec3 = nsec3Record.RDATA as DnsNSEC3RecordData;
+                if (!TryUseSupportedNsec3(nsec3))
+                    continue;
+
                 string nsec3ZoneName = GetHashedOwnerNameZoneNameFrom(nsec3Record.Name);
 
                 if ((closestEncloserZoneName is not null) && !DnsDatagram.EqualsIgnoreCaseAscii(nsec3ZoneName, closestEncloserZoneName))
@@ -251,6 +264,9 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
 
                 if (closestEncloserSalt is not null)
                 {
+                    if (nsec3.HashAlgorithm != closestEncloserHashAlgorithm)
+                        continue;
+
                     if (nsec3.Iterations != closestEncloserIterations)
                         continue;
 
@@ -295,6 +311,9 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
                     continue;
 
                 DnsNSEC3RecordData nsec3 = nsec3Record.RDATA as DnsNSEC3RecordData;
+                if (!TryUseSupportedNsec3(nsec3))
+                    continue;
+
                 string nsec3ZoneName = GetHashedOwnerNameZoneNameFrom(nsec3Record.Name);
 
                 if ((closestEncloserZoneName is not null) && !DnsDatagram.EqualsIgnoreCaseAscii(nsec3ZoneName, closestEncloserZoneName))
