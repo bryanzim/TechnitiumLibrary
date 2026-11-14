@@ -38,6 +38,7 @@ namespace TechnitiumLibrary.Net.Http
         readonly int _maxContentLength;
 
         readonly MemoryStream _buffer = new MemoryStream(1024);
+        int _payloadBytesRead;
 
         #endregion
 
@@ -103,15 +104,17 @@ namespace TechnitiumLibrary.Net.Http
                 if (bytesRead > 0)
                     return bytesRead;
 
-                if ((_maxContentLength > -1) && (_baseStream.TotalBytesRead > _maxContentLength))
-                    throw new HttpRequestException("Response content size is greater than max content length: " + _baseStream.TotalBytesRead);
-
                 int chunkLength = ReadChunkLength();
 
                 _buffer.SetLength(0);
 
                 if (chunkLength > 0)
                 {
+                    long payloadLength = (long)_payloadBytesRead + chunkLength;
+                    if ((_maxContentLength > -1) && (payloadLength > _maxContentLength))
+                        throw new HttpRequestException("Response content size is greater than max content length: " + payloadLength);
+
+                    _payloadBytesRead += chunkLength;
                     _baseStream.CopyTo(_buffer, BUFFER_SIZE, chunkLength);
                     _buffer.Position = 0;
                     ReadChunkDelimiter();
@@ -136,15 +139,17 @@ namespace TechnitiumLibrary.Net.Http
                 if (bytesRead > 0)
                     return bytesRead;
 
-                if ((_maxContentLength > -1) && (_baseStream.TotalBytesRead > _maxContentLength))
-                    throw new HttpRequestException("Response content size is greater than max content length: " + _baseStream.TotalBytesRead);
-
                 int chunkLength = await ReadChunkLengthAsync(cancellationToken);
 
                 _buffer.SetLength(0);
 
                 if (chunkLength > 0)
                 {
+                    long payloadLength = (long)_payloadBytesRead + chunkLength;
+                    if ((_maxContentLength > -1) && (payloadLength > _maxContentLength))
+                        throw new HttpRequestException("Response content size is greater than max content length: " + payloadLength);
+
+                    _payloadBytesRead += chunkLength;
                     await _baseStream.CopyToAsync(_buffer, BUFFER_SIZE, chunkLength, cancellationToken);
                     _buffer.Position = 0;
                     await ReadChunkDelimiterAsync(cancellationToken);

@@ -137,7 +137,7 @@ namespace TechnitiumLibrary.Net.Http
                 string strContentLength = httpResponse._headers[HttpRequestHeader.ContentLength];
                 if (!string.IsNullOrEmpty(strContentLength))
                 {
-                    if (!int.TryParse(strContentLength, out int contentLength) || (contentLength < 0))
+                    if (!HttpRequest.TryParseContentLength(strContentLength, out int contentLength))
                         throw new HttpRequestException("Content-Length is invalid: " + strContentLength);
 
                     int available = length - offset;
@@ -148,6 +148,13 @@ namespace TechnitiumLibrary.Net.Http
                     }
 
                     httpResponse._outputStream = new HttpContentStream(readStream, buffer, offset, length, contentLength);
+                    return httpResponse;
+                }
+
+                bool hasBody = (httpResponse._statusCode >= 200) && (httpResponse._statusCode != 204) && (httpResponse._statusCode != 304);
+                if (hasBody)
+                {
+                    httpResponse._outputStream = new HttpContentStream(readStream, buffer, offset, length);
                     return httpResponse;
                 }
 
