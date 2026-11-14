@@ -196,6 +196,25 @@ namespace TechnitiumLibrary.Net.UPnP.Networking
 
         #region private
 
+        internal static bool ParseBoolean(string value)
+        {
+            switch (value.Trim().ToLowerInvariant())
+            {
+                case "1":
+                case "true":
+                case "yes":
+                    return true;
+
+                case "0":
+                case "false":
+                case "no":
+                    return false;
+
+                default:
+                    throw new FormatException("UPnP boolean is invalid: " + value);
+            }
+        }
+
         static string XmlEscape(string value)
         {
             if (string.IsNullOrEmpty(value))
@@ -470,7 +489,7 @@ namespace TechnitiumLibrary.Net.UPnP.Networking
                     XmlNode node4 = xResp.SelectSingleNode("//NewPortMappingDescription/text()", nsMgr);
                     XmlNode node5 = xResp.SelectSingleNode("//NewLeaseDuration/text()", nsMgr);
 
-                    return new PortMappingEntry(Convert.ToInt32(node1.Value), IPAddress.Parse(node2.Value), Convert.ToBoolean(Convert.ToInt32(node3.Value)), node4.Value, Convert.ToInt32(node5.Value));
+                    return new PortMappingEntry(Convert.ToInt32(node1.Value), IPAddress.Parse(node2.Value), ParseBoolean(node3.Value), node4.Value, Convert.ToInt32(node5.Value));
 
                 case 714:
                     //The specified value does not exists in the array
@@ -535,7 +554,7 @@ namespace TechnitiumLibrary.Net.UPnP.Networking
                     XmlNode node7 = xResp.SelectSingleNode("//NewPortMappingDescription/text()", nsMgr);
                     XmlNode node8 = xResp.SelectSingleNode("//NewLeaseDuration/text()", nsMgr);
 
-                    return new GenericPortMappingEntry(RemoteHost, Convert.ToInt32(node2.Value), (ProtocolType)Enum.Parse(typeof(ProtocolType), node3.Value, true), Convert.ToInt32(node4.Value), IPAddress.Parse(node5.Value), Convert.ToBoolean(Convert.ToInt32(node6.Value)), node7.Value, Convert.ToInt32(node8.Value));
+                    return new GenericPortMappingEntry(RemoteHost, Convert.ToInt32(node2.Value), (ProtocolType)Enum.Parse(typeof(ProtocolType), node3.Value, true), Convert.ToInt32(node4.Value), IPAddress.Parse(node5.Value), ParseBoolean(node6.Value), node7.Value, Convert.ToInt32(node8.Value));
 
                 case 713:
                     //The specified array index is out of bound

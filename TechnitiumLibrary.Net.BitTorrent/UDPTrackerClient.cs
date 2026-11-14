@@ -22,6 +22,7 @@ using System.Collections.Generic;
 using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
+using System.Text;
 using System.Threading.Tasks;
 using TechnitiumLibrary.Net.Proxy;
 
@@ -63,6 +64,8 @@ namespace TechnitiumLibrary.Net.BitTorrent
                 responseLength = await udpSocket.UdpQueryAsync(request, response, (IPEndPoint)trackerEP, TIMEOUT, 3, true, received => IsTrackerDatagram(response, received, transactionID, 0));
             else
                 responseLength = await proxyHandler.UdpQueryAsync(request, response, trackerEP, TIMEOUT, 3, true, received => IsTrackerDatagram(response, received, transactionID, 0));
+
+            ThrowIfTrackerError(response, responseLength);
 
             //check response length
             if (responseLength < 16)
@@ -148,6 +151,8 @@ namespace TechnitiumLibrary.Net.BitTorrent
             else
                 bytesReceived = await proxyHandler.UdpQueryAsync(request, buffer, trackerEP, TIMEOUT, 3, true, received => IsTrackerDatagram(buffer, received, transactionID, 1));
 
+            ThrowIfTrackerError(buffer, bytesReceived);
+
             //check response length
             if (bytesReceived < 20)
                 throw new TrackerClientException("Invalid response received for announce request.");
@@ -178,6 +183,18 @@ namespace TechnitiumLibrary.Net.BitTorrent
             }
 
             return (response[3] == expectedAction) || (response[3] == 3);
+        }
+
+        internal static void ThrowIfTrackerError(byte[] buffer, int length)
+        {
+            if ((length < 8) || (buffer[0] != 0) || (buffer[1] != 0) || (buffer[2] != 0) || (buffer[3] != 3))
+                return;
+
+            string message = Encoding.UTF8.GetString(buffer, 8, length - 8);
+            if (message.Length == 0)
+                message = "Tracker returned an error.";
+
+            throw new TrackerClientException(message);
         }
 
         static bool AnnouncePeersAreIPv6(Socket udpSocket, SocksProxyUdpAssociateHandler proxyHandler)
@@ -252,7 +269,11 @@ namespace TechnitiumLibrary.Net.BitTorrent
         {
             SocksProxyUdpAssociateHandler proxyHandler = null;
             Socket udpSocket = null;
-            EndPoint trackerEP = new DomainEndPoint(_trackerURI.Host, _trackerURI.Port);
+            EndPoint trackerEP;
+            if (IPAddress.TryParse(_trackerURI.Host, out IPAddress trackerAddress))
+                trackerEP = new IPEndPoint(trackerAddress, _trackerURI.Port);
+            else
+                trackerEP = new DomainEndPoint(_trackerURI.Host, _trackerURI.Port);
 
             if (_proxy == null)
             {
