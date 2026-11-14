@@ -630,36 +630,26 @@ namespace TechnitiumLibrary.ByteTree
 
             public Node? GetLastNodeWithValue()
             {
-                Node? lastNode = null;
-                Node current = this;
+                return FindRightmostWithValue(this);
+            }
 
-                while (true)
+            static Node? FindRightmostWithValue(Node node)
+            {
+                if (node._children is not null)
                 {
-                    if (current._value is not null)
-                        lastNode = current;
-
-                    if (current._children is null)
-                        break;
-
-                    Node? next = null;
-
-                    for (int i = current._children.Length - 1; i > -1; i--)
+                    for (int i = node._children.Length - 1; i > -1; i--)
                     {
-                        Node child = Volatile.Read(ref current._children[i]);
-                        if (child is not null)
-                        {
-                            next = child;
-                            break;
-                        }
+                        Node child = Volatile.Read(ref node._children[i]);
+                        if (child is null)
+                            continue;
+
+                        Node? nested = FindRightmostWithValue(child);
+                        if (nested is not null)
+                            return nested;
                     }
-
-                    if (next is null)
-                        break;
-
-                    current = next;
                 }
 
-                return lastNode;
+                return node._value is not null ? node : null;
             }
 
             public Node? GetPreviousNodeWithValue(int baseDepth)
@@ -729,22 +719,25 @@ namespace TechnitiumLibrary.ByteTree
 
             public bool IsEmpty
             {
-                get
-                {
-                    if (_value is not null)
-                        return false;
+                get { return !ContainsValue(this); }
+            }
 
-                    if (_children is not null)
-                    {
-                        for (int i = 0; i < _children.Length; i++)
-                        {
-                            if (Volatile.Read(ref _children[i]) is not null)
-                                return false;
-                        }
-                    }
-
+            static bool ContainsValue(Node node)
+            {
+                if (node._value is not null)
                     return true;
+
+                if (node._children is null)
+                    return false;
+
+                for (int i = 0; i < node._children.Length; i++)
+                {
+                    Node child = Volatile.Read(ref node._children[i]);
+                    if ((child is not null) && ContainsValue(child))
+                        return true;
                 }
+
+                return false;
             }
 
             public bool HasChildren

@@ -27,6 +27,7 @@
 		<ProjectReference Include="..\TechnitiumLibrary.Net.BitTorrent\TechnitiumLibrary.Net.BitTorrent.csproj" />
 		<ProjectReference Include="..\TechnitiumLibrary.Net.Mail\TechnitiumLibrary.Net.Mail.csproj" />
 		<ProjectReference Include="..\TechnitiumLibrary.Net.UPnP\TechnitiumLibrary.Net.UPnP.csproj" />
+		<ProjectReference Include="..\TechnitiumLibrary.ByteTree\TechnitiumLibrary.ByteTree.csproj" />
 	</ItemGroup>
 
 </Project>
