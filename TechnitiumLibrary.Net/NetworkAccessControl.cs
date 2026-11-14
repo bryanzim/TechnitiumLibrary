@@ -121,12 +121,15 @@ namespace TechnitiumLibrary.Net
 
         public static IReadOnlyCollection<NetworkAccessControl> ConvertFromAPLRecordData(DnsAPLRecordData rdata)
         {
-            IReadOnlyCollection<DnsAPLRecordData.APItem> apItems = rdata.APItems;
-            NetworkAccessControl[] acl = new NetworkAccessControl[apItems.Count];
-            int i = 0;
+            List<NetworkAccessControl> acl = new List<NetworkAccessControl>();
 
-            foreach (DnsAPLRecordData.APItem apItem in apItems)
-                acl[i++] = new NetworkAccessControl(apItem.NetworkAddress, apItem.Negation);
+            foreach (DnsAPLRecordData.APItem apItem in rdata.APItems)
+            {
+                if (apItem.NetworkAddress is null)
+                    continue;
+
+                acl.Add(new NetworkAccessControl(apItem.NetworkAddress, apItem.Negation));
+            }
 
             return acl;
         }
