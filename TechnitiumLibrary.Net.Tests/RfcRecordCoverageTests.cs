@@ -203,6 +203,12 @@ namespace TechnitiumLibrary.Net.Tests
 
             Assert.Equal(IPAddress.Parse("2001:db8:c000:201::"), mapped);
             Assert.Equal(IPAddress.Parse("192.0.2.1"), mapped.MapToIPv4(32));
+
+            Assert.Equal(IPAddress.Parse("2001:db8:c0:2:1::"), IPAddress.Parse("192.0.2.1").MapToIPv6(NetworkAddress.Parse("2001:db8::/40")));
+            Assert.Equal(IPAddress.Parse("2001:db8:0:c000:2:100::"), IPAddress.Parse("192.0.2.1").MapToIPv6(NetworkAddress.Parse("2001:db8::/48")));
+            Assert.Equal(IPAddress.Parse("2001:db8:0:c0:0:201::"), IPAddress.Parse("192.0.2.1").MapToIPv6(NetworkAddress.Parse("2001:db8::/56")));
+            Assert.Equal(IPAddress.Parse("2001:db8::c0:2:100:0"), IPAddress.Parse("192.0.2.1").MapToIPv6(NetworkAddress.Parse("2001:db8::/64")));
+            Assert.Equal(IPAddress.Parse("2001:db8::192.0.2.1"), IPAddress.Parse("192.0.2.1").MapToIPv6(NetworkAddress.Parse("2001:db8::/96")));
         }
 
         [Fact]
