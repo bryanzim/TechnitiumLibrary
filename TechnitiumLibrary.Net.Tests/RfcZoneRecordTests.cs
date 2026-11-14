@@ -77,6 +77,24 @@ namespace TechnitiumLibrary.Net.Tests
         }
 
         [Fact]
+        public async Task DomainNameDecimalEscapeBecomesTheOctet()
+        {
+            string zone = "$ORIGIN example.com.\nex\\097mple A 1.2.3.4\n";
+            List<DnsResourceRecord> records = await ZoneFile.ReadZoneFileFromAsync(new StringReader(zone));
+
+            Assert.Equal("example.example.com", records[0].Name);
+        }
+
+        [Fact]
+        public void SvcbTargetNameRejectsCompression()
+        {
+            DnsDatagram message = DnsWire.Read(MessageWithRData(DnsResourceRecordType.SVCB, new byte[] { 0x00, 0x01, 0xC0, 0x00 }));
+
+            DnsClientException ex = Assert.IsType<DnsClientException>(message.ParsingException);
+            Assert.Contains("compression", ex.Message);
+        }
+
+        [Fact]
         public void SvcbKeysMustIncrease()
         {
             byte[] rdata = new byte[] { 0x00, 0x01, 0x00, 0x00, 0x03, 0x00, 0x02, 0x00, 0x50, 0x00, 0x01 };

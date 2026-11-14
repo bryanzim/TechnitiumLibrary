@@ -491,7 +491,7 @@ namespace TechnitiumLibrary.Net.Dns
             s.WriteByte(0);
         }
 
-        public static string DeserializeDomainName(Stream s, int maxDepth = 10, bool ignoreMissingNullTermination = false, bool isEmailAddress = false)
+        public static string DeserializeDomainName(Stream s, int maxDepth = 10, bool ignoreMissingNullTermination = false, bool isEmailAddress = false, bool allowCompression = true)
         {
             if (maxDepth < 0)
                 throw new DnsClientException("Error while reading domain name: max depth for decompression reached");
@@ -509,6 +509,9 @@ namespace TechnitiumLibrary.Net.Dns
             {
                 if ((labelLength & 0xC0) == 0xC0)
                 {
+                    if (!allowCompression)
+                        throw new DnsClientException("Error while reading domain name: compression pointer is not allowed.");
+
                     int secondByte = s.ReadByte();
                     if (secondByte < 0)
                         throw new EndOfStreamException();
@@ -521,7 +524,7 @@ namespace TechnitiumLibrary.Net.Dns
                     long currentPosition = s.Position;
                     s.Position = offset;
 
-                    string domainSuffix = DeserializeDomainName(s, maxDepth - 1, ignoreMissingNullTermination, isEmailAddress);
+                    string domainSuffix = DeserializeDomainName(s, maxDepth - 1, ignoreMissingNullTermination, isEmailAddress, allowCompression);
                     int suffixWireLength = domainSuffix.Length == 0 ? 1 : domainSuffix.Length + 2;
                     if (uncompressedLength + suffixWireLength > 255)
                         throw new DnsClientException("Error while reading domain name: domain name length cannot exceed 255 bytes.");

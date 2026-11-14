@@ -87,7 +87,7 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
             using (MemoryStream mS = new MemoryStream(_rData))
             {
                 _svcPriority = DnsDatagram.ReadUInt16NetworkOrder(mS);
-                _targetName = DnsDatagram.DeserializeDomainName(mS);
+                _targetName = DnsDatagram.DeserializeDomainName(mS, allowCompression: false);
 
                 Dictionary<DnsSvcParamKey, DnsSvcParamValue> svcParams = new Dictionary<DnsSvcParamKey, DnsSvcParamValue>();
                 ushort lastSvcParamKey = 0;
