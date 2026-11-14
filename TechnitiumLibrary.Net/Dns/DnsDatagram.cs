@@ -2099,12 +2099,6 @@ namespace TechnitiumLibrary.Net.Dns
 
         #region private
 
-        private static bool IsTsigTimeValid(ulong timeSigned, ushort fudge, DateTime utcNow)
-        {
-            // RFC 8945 Sections 5.2.3 and 5.4.3 require current time to be within Time Signed +/- Fudge.
-            return Math.Abs((utcNow - DateTime.UnixEpoch).TotalSeconds - timeSigned) <= fudge;
-        }
-
         private byte[] ComputeTsigRequestMac(string keyName, string algorithmName, ulong timeSigned, ushort fudge, DnsTsigError error, byte[] otherData, string sharedSecret, int truncationLength)
         {
             using (MemoryStream mS = new MemoryStream(256))
