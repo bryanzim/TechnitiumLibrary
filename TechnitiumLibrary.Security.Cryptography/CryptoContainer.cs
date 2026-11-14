@@ -127,11 +127,11 @@ namespace TechnitiumLibrary.Security.Cryptography
                         switch (keySizeBytes)
                         {
                             case 16:
-                                key = HashAlgorithm.Create("MD5").ComputeHash(Encoding.UTF8.GetBytes(password));
+                                key = MD5.HashData(Encoding.UTF8.GetBytes(password));
                                 break;
 
                             case 32:
-                                key = HashAlgorithm.Create("SHA256").ComputeHash(Encoding.UTF8.GetBytes(password));
+                                key = SHA256.HashData(Encoding.UTF8.GetBytes(password));
                                 break;
 
                             default:

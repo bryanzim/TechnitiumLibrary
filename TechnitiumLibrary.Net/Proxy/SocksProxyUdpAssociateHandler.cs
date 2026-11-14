@@ -277,7 +277,12 @@ namespace TechnitiumLibrary.Net.Proxy
                         Buffer.BlockCopy(datagram, 3 + 1 + 1 + length, port, 0, 2);
                         Array.Reverse(port);
 
-                        remoteEP = new DomainEndPoint(Encoding.ASCII.GetString(address), BitConverter.ToUInt16(port, 0));
+                        string domain = Encoding.ASCII.GetString(address);
+                        ushort domainPort = BitConverter.ToUInt16(port, 0);
+                        if (IPAddress.TryParse(domain, out IPAddress ipAddress))
+                            remoteEP = new IPEndPoint(ipAddress, domainPort);
+                        else
+                            remoteEP = new DomainEndPoint(domain, domainPort);
                     }
                     break;
 
@@ -285,27 +290,7 @@ namespace TechnitiumLibrary.Net.Proxy
                     throw new NotSupportedException("SocksAddressType not supported.");
             }
 
-            int addressSize;
-
-            switch (remoteEP.AddressFamily)
-            {
-                case AddressFamily.InterNetwork:
-                    addressSize = 4;
-                    break;
-
-                case AddressFamily.InterNetworkV6:
-                    addressSize = 16;
-                    break;
-
-                case AddressFamily.Unspecified:
-                    addressSize = 1 + (remoteEP as DomainEndPoint).Address.Length;
-                    break;
-
-                default:
-                    throw new NotSupportedException("Address Family not supported.");
-            }
-
-            int dataOffset = 6 + addressSize;
+            int dataOffset = headerLength;
             int dataSize = result.ReceivedBytes - dataOffset;
 
             if (dataSize < 0)

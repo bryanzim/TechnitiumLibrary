@@ -30,6 +30,7 @@ namespace TechnitiumLibrary.Net
 
         readonly AddressFamily _addressFamily;
         readonly List<IpEntry> _ipLookupList;
+        int _nextRangeId;
         bool _sorted;
 
         #endregion
@@ -112,8 +113,9 @@ namespace TechnitiumLibrary.Net
 
             lock (_ipLookupList)
             {
-                _ipLookupList.Add(new IpEntry(networkAddress.Address, value));
-                _ipLookupList.Add(new IpEntry(networkAddress.GetLastAddress(), value));
+                int rangeId = _nextRangeId++;
+                _ipLookupList.Add(new IpEntry(networkAddress.Address, value, rangeId, true));
+                _ipLookupList.Add(new IpEntry(networkAddress.GetLastAddress(), value, rangeId, false));
 
                 _sorted = false;
             }
@@ -176,7 +178,7 @@ namespace TechnitiumLibrary.Net
                 value = floorEntry.Value;
             else if (ceilingEntry.IpAddress.SequenceEqual(findEntry.IpAddress))
                 value = ceilingEntry.Value;
-            else if (EqualityComparer<T>.Default.Equals(floorEntry.Value, ceilingEntry.Value))
+            else if (floorEntry.IsRangeStartFor(ceilingEntry))
                 value = floorEntry.Value;
             else
             {
@@ -195,15 +197,19 @@ namespace TechnitiumLibrary.Net
 
             readonly byte[] _ipAddress;
             readonly T _value;
+            readonly int _rangeId;
+            readonly bool _isStart;
 
             #endregion
 
             #region constructor
 
-            public IpEntry(IPAddress ipAddress, T value)
+            public IpEntry(IPAddress ipAddress, T value, int rangeId, bool isStart)
             {
                 _ipAddress = ipAddress.GetAddressBytes();
                 _value = value;
+                _rangeId = rangeId;
+                _isStart = isStart;
             }
 
             public IpEntry(IPAddress ipAddress)
@@ -293,6 +299,11 @@ namespace TechnitiumLibrary.Net
 
             public T Value
             { get { return _value; } }
+
+            public bool IsRangeStartFor(IpEntry end)
+            {
+                return _isStart && !end._isStart && (_rangeId == end._rangeId);
+            }
 
             #endregion
         }

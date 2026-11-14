@@ -312,6 +312,9 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
                 if (bitmapLength < 0)
                     throw new EndOfStreamException();
 
+                if ((bitmapLength < 1) || (bitmapLength > 32))
+                    throw new DnsClientException("NSEC type bitmap length must be between 1 and 32.");
+
                 byte[] bitmap = s.ReadExactly(bitmapLength);
 
                 windowBlockNumber <<= 8;

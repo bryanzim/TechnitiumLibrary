@@ -19,7 +19,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 using System;
 using System.IO;
-using System.Net;
+using System.Net.Http;
 using System.Text;
 using TechnitiumLibrary.Net.Proxy;
 
@@ -69,35 +69,48 @@ namespace TechnitiumLibrary.Security.Cryptography
             if (certToCheck.RevocationURL == null)
                 throw new CryptoException("Certificate does not support revocation.");
 
-            using (WebClientEx client = new WebClientEx())
+            using (HttpClientHandler handler = new HttpClientHandler())
             {
-                client.Proxy = proxy;
-                client.Timeout = timeout;
+                handler.UseProxy = proxy != null;
+                if (proxy != null)
+                    handler.Proxy = proxy;
 
-                using (Stream s = client.OpenRead(certToCheck.RevocationURL.AbsoluteUri + "?sn=" + certToCheck.SerialNumber))
+                using (HttpClient client = new HttpClient(handler, false))
                 {
-                    switch (s.ReadByte())
+                    if (timeout > 0)
+                        client.Timeout = TimeSpan.FromMilliseconds(timeout);
+
+                    using (HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Get, certToCheck.RevocationURL.AbsoluteUri + "?sn=" + certToCheck.SerialNumber))
+                    using (HttpResponseMessage response = client.Send(request))
                     {
-                        case -1:
-                            throw new EndOfStreamException();
+                        response.EnsureSuccessStatusCode();
 
-                        case 0: //not found
-                            revokeCert = null;
-                            return false;
+                        using (Stream s = response.Content.ReadAsStream())
+                        {
+                            switch (s.ReadByte())
+                            {
+                                case -1:
+                                    throw new EndOfStreamException();
 
-                        case 1:
-                            revokeCert = new RevocationCertificate(s);
-                            break;
+                                case 0: //not found
+                                    revokeCert = null;
+                                    return false;
 
-                        default:
-                            throw new CryptoException("RevokedCertificate version not supported.");
+                                case 1:
+                                    revokeCert = new RevocationCertificate(s);
+                                    break;
+
+                                default:
+                                    throw new CryptoException("RevokedCertificate version not supported.");
+                            }
+                        }
+
+                        if (!revokeCert.IsValid(certToCheck))
+                            throw new InvalidCertificateException("Revocation certificate signature is invalid.");
+
+                        return true;
                     }
                 }
-
-                if (!revokeCert.IsValid(certToCheck))
-                    throw new InvalidCertificateException("Revocation certificate signature is invalid.");
-
-                return true;
             }
         }
 
@@ -137,7 +150,8 @@ namespace TechnitiumLibrary.Security.Cryptography
                 bW.Flush();
                 mS.Position = 0;
 
-                return System.Security.Cryptography.HashAlgorithm.Create(hashAlgorithm).ComputeHash(mS);
+                using (System.Security.Cryptography.HashAlgorithm hash = HashAlgorithms.Create(hashAlgorithm))
+                    return hash.ComputeHash(mS);
             }
         }
 
@@ -234,24 +248,5 @@ namespace TechnitiumLibrary.Security.Cryptography
         { get { return _hashAlgo; } }
 
         #endregion
-
-        class WebClientEx : WebClient
-        {
-            protected override WebRequest GetWebRequest(Uri address)
-            {
-                HttpWebRequest request = base.GetWebRequest(address) as HttpWebRequest;
-
-                if (Timeout > 0)
-                    request.Timeout = Timeout;
-
-                return request;
-            }
-
-            public int Timeout
-            {
-                get;
-                set;
-            }
-        }
     }
 }

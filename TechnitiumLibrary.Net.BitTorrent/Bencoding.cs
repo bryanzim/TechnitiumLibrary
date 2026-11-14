@@ -46,7 +46,21 @@ namespace TechnitiumLibrary.Net.BitTorrent
         public Bencoding(BencodingType type, object value)
         {
             _type = type;
-            _value = value;
+
+            switch (type)
+            {
+                case BencodingType.Integer:
+                    _value = Convert.ToInt64(value);
+                    break;
+
+                case BencodingType.String:
+                    _value = value is string text ? Encoding.Latin1.GetBytes(text) : value;
+                    break;
+
+                default:
+                    _value = value;
+                    break;
+            }
         }
 
         #endregion
@@ -61,24 +75,53 @@ namespace TechnitiumLibrary.Net.BitTorrent
 
         private static long DecodeInteger(Stream s)
         {
-            string TMP = string.Empty;
-            int b;
+            int b = s.ReadByte();
+            if (b < 0)
+                throw new EndOfStreamException();
 
-            while (true)
+            bool negative = false;
+            if (b == '-')
             {
+                negative = true;
                 b = s.ReadByte();
+                if (b < 0)
+                    throw new EndOfStreamException();
+            }
 
-                switch (b)
+            if ((b < '0') || (b > '9'))
+                throw new FormatException("Invalid bencoded integer.");
+
+            // i0e is the only encoding that may use a zero digit first. i-0e and i03e are invalid.
+            if (b == '0')
+            {
+                int end = s.ReadByte();
+                if (end < 0)
+                    throw new EndOfStreamException();
+
+                if (negative || (end != 'e'))
+                    throw new FormatException("Invalid bencoded integer.");
+
+                return 0;
+            }
+
+            long value = 0;
+
+            while (b != 'e')
+            {
+                if ((b < '0') || (b > '9'))
+                    throw new FormatException("Invalid bencoded integer.");
+
+                checked
                 {
-                    case 101: //e
-                        return Convert.ToInt64(TMP);
-
-                    case -1:
-                        throw new EndOfStreamException();
+                    value = (value * 10) + (b - '0');
                 }
 
-                TMP += Convert.ToChar(b);
+                b = s.ReadByte();
+                if (b < 0)
+                    throw new EndOfStreamException();
             }
+
+            return negative ? -value : value;
         }
 
         private static void EncodeString(byte[] value, Stream s)
@@ -106,7 +149,24 @@ namespace TechnitiumLibrary.Net.BitTorrent
                 preByte = (byte)next;
             }
 
-            byte[] buffer = new byte[Convert.ToInt32(TMP)];
+            if (TMP.Length == 0)
+                throw new FormatException("Invalid bencoded string length.");
+
+            int stringLength = 0;
+
+            for (int i = 0; i < TMP.Length; i++)
+            {
+                char c = TMP[i];
+                if ((c < '0') || (c > '9'))
+                    throw new FormatException("Invalid bencoded string length.");
+
+                if (stringLength > ((int.MaxValue - (c - '0')) / 10))
+                    throw new FormatException("Invalid bencoded string length.");
+
+                stringLength = (stringLength * 10) + (c - '0');
+            }
+
+            byte[] buffer = new byte[stringLength];
             int offset = 0;
 
             while (offset < buffer.Length)
@@ -178,7 +238,11 @@ namespace TechnitiumLibrary.Net.BitTorrent
                 if (b.Type != BencodingType.String)
                     throw new Exception("Invalid bencoded dictionary format.");
 
-                dict.Add(b.ValueString, Decode(s));
+                Bencoding value = Decode(s);
+                if (value is null)
+                    throw new Exception("Invalid bencoded dictionary format.");
+
+                dict.Add(b.ValueString, value);
             }
 
             return dict;

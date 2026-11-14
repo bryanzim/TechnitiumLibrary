@@ -174,7 +174,7 @@ namespace TechnitiumLibrary.Net.Http
                 string strContentLength = httpRequest._headers[HttpRequestHeader.ContentLength];
                 if (!string.IsNullOrEmpty(strContentLength))
                 {
-                    if (!int.TryParse(strContentLength, out int contentLength) || (contentLength < 0))
+                    if (!TryParseContentLength(strContentLength, out int contentLength))
                         throw new HttpRequestException("Content-Length is invalid: " + strContentLength);
 
                     if ((maxContentLength > -1) && (contentLength > maxContentLength))
@@ -196,6 +196,42 @@ namespace TechnitiumLibrary.Net.Http
             }
 
             return httpRequest;
+        }
+
+        internal static bool TryParseContentLength(string value, out int contentLength)
+        {
+            contentLength = 0;
+
+            if (string.IsNullOrEmpty(value))
+                return false;
+
+            int start = 0;
+            int end = value.Length;
+
+            while ((start < end) && ((value[start] == ' ') || (value[start] == '\t')))
+                start++;
+
+            while ((end > start) && ((value[end - 1] == ' ') || (value[end - 1] == '\t')))
+                end--;
+
+            if (start == end)
+                return false;
+
+            long length = 0;
+
+            for (int i = start; i < end; i++)
+            {
+                char c = value[i];
+                if ((c < '0') || (c > '9'))
+                    return false;
+
+                length = (length * 10) + (c - '0');
+                if (length > int.MaxValue)
+                    return false;
+            }
+
+            contentLength = (int)length;
+            return true;
         }
 
         #endregion

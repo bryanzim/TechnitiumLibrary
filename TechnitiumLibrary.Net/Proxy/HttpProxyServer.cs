@@ -19,6 +19,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 using System;
 using System.Collections.Concurrent;
+using System.IO;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
@@ -444,7 +445,13 @@ namespace TechnitiumLibrary.Net.Proxy
                             await remoteStream.WriteAsync(httpRequest.Headers.ToByteArray());
 
                             if (httpRequest.InputStream != null)
-                                await httpRequest.InputStream.CopyToAsync(remoteStream);
+                            {
+                                string transferEncoding = httpRequest.Headers[HttpRequestHeader.TransferEncoding];
+                                if (!string.IsNullOrEmpty(transferEncoding))
+                                    await WriteChunkedBodyAsync(httpRequest.InputStream, remoteStream);
+                                else
+                                    await httpRequest.InputStream.CopyToAsync(remoteStream);
+                            }
 
                             await remoteStream.FlushAsync();
 
@@ -461,6 +468,24 @@ namespace TechnitiumLibrary.Net.Proxy
                     if (!dontDispose)
                         Dispose();
                 }
+            }
+
+            static async Task WriteChunkedBodyAsync(Stream body, Stream destination)
+            {
+                byte[] buffer = new byte[8192];
+
+                while (true)
+                {
+                    int bytesRead = await body.ReadAsync(buffer);
+                    if (bytesRead < 1)
+                        break;
+
+                    await destination.WriteAsync(Encoding.ASCII.GetBytes(bytesRead.ToString("X") + "\r\n"));
+                    await destination.WriteAsync(buffer.AsMemory(0, bytesRead));
+                    await destination.WriteAsync(Encoding.ASCII.GetBytes("\r\n"));
+                }
+
+                await destination.WriteAsync(Encoding.ASCII.GetBytes("0\r\n\r\n"));
             }
 
             #endregion

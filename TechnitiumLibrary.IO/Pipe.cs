@@ -93,15 +93,12 @@ namespace TechnitiumLibrary.IO
                         _disposed = true;
                         Monitor.PulseAll(_bufferLock);
                         other = _otherPipe;
-                        _otherPipe = null;
                     }
 
                     if (other != null)
                     {
                         lock (other._bufferLock)
                         {
-                            other._otherPipe = null;
-
                             if (!other._disposed)
                             {
                                 other._disposed = true;
@@ -201,7 +198,10 @@ namespace TechnitiumLibrary.IO
 
             public override int Read(byte[] buffer, int offset, int count)
             {
-                if (count < 1)
+                if (count < 0)
+                    throw new ArgumentOutOfRangeException(nameof(count));
+
+                if (count == 0)
                     return 0;
 
                 return _otherPipe!.ReadBuffer(buffer, offset, count, _readTimeout);

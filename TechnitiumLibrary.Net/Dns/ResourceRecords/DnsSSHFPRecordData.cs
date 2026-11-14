@@ -163,7 +163,7 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
             jsonWriter.WriteStartObject();
 
             jsonWriter.WriteString("Algorithm", _algorithm.ToString());
-            jsonWriter.WriteString("FingerprintType", _fingerprint.ToString());
+            jsonWriter.WriteString("FingerprintType", _fingerprintType.ToString());
             jsonWriter.WriteString("Fingerprint", Convert.ToHexString(_fingerprint));
 
             jsonWriter.WriteEndObject();

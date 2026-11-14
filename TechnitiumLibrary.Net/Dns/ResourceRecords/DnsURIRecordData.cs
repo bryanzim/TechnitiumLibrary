@@ -33,9 +33,8 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
 
         ushort _priority;
         ushort _weight;
+        string _target;
         Uri _uri;
-
-        byte[] _rData;
 
         #endregion
 
@@ -45,6 +44,7 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
         {
             _priority = priority;
             _weight = weight;
+            _target = uri.OriginalString;
             _uri = uri;
         }
 
@@ -58,31 +58,17 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
 
         protected override void ReadRecordData(Stream s)
         {
-            _rData = s.ReadExactly(_rdLength);
-
-            using (MemoryStream mS = new MemoryStream(_rData))
-            {
-                _priority = DnsDatagram.ReadUInt16NetworkOrder(mS);
-                _weight = DnsDatagram.ReadUInt16NetworkOrder(mS);
-                _uri = new Uri(Encoding.UTF8.GetString(mS.ReadExactly(_rdLength - 4)));
-            }
+            _priority = DnsDatagram.ReadUInt16NetworkOrder(s);
+            _weight = DnsDatagram.ReadUInt16NetworkOrder(s);
+            _target = Encoding.UTF8.GetString(s.ReadExactly(_rdLength - 4));
+            Uri.TryCreate(_target, UriKind.Absolute, out _uri);
         }
 
         protected override void WriteRecordData(Stream s, List<DnsDomainOffset> domainEntries, bool canonicalForm)
         {
-            if (_rData is null)
-            {
-                using (MemoryStream mS = new MemoryStream())
-                {
-                    DnsDatagram.WriteUInt16NetworkOrder(_priority, mS);
-                    DnsDatagram.WriteUInt16NetworkOrder(_weight, mS);
-                    mS.Write(Encoding.UTF8.GetBytes(_uri.AbsoluteUri));
-
-                    _rData = mS.ToArray();
-                }
-            }
-
-            s.Write(_rData);
+            DnsDatagram.WriteUInt16NetworkOrder(_priority, s);
+            DnsDatagram.WriteUInt16NetworkOrder(_weight, s);
+            s.Write(Encoding.UTF8.GetBytes(_target));
         }
 
         #endregion
@@ -104,7 +90,7 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
 
         internal override string ToZoneFileEntry(string originDomain = null)
         {
-            return _priority + " " + _weight + " \"" + _uri.AbsoluteUri + "\"";
+            return _priority + " " + _weight + " \"" + _target + "\"";
         }
 
         #endregion
@@ -127,7 +113,7 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
                 if (_weight != other._weight)
                     return false;
 
-                return _uri.Equals(other._uri);
+                return _target.Equals(other._target, StringComparison.Ordinal);
             }
 
             return false;
@@ -135,7 +121,7 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
 
         public override int GetHashCode()
         {
-            return HashCode.Combine(_priority, _weight, _uri);
+            return HashCode.Combine(_priority, _weight, _target);
         }
 
         public override void SerializeTo(Utf8JsonWriter jsonWriter)
@@ -144,7 +130,7 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
 
             jsonWriter.WriteNumber("Priority", _priority);
             jsonWriter.WriteNumber("Weight", _weight);
-            jsonWriter.WriteString("URI", _uri.AbsoluteUri);
+            jsonWriter.WriteString("URI", _target);
 
             jsonWriter.WriteEndObject();
         }
@@ -163,7 +149,7 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
         { get { return _uri; } }
 
         public override int UncompressedLength
-        { get { return 2 + 2 + Encoding.UTF8.GetByteCount(_uri.AbsoluteUri); } }
+        { get { return 2 + 2 + Encoding.UTF8.GetByteCount(_target); } }
 
         #endregion
     }

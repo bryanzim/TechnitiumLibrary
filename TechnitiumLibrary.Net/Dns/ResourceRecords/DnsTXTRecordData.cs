@@ -127,6 +127,9 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
                 count = _rData[offset];
                 offset++;
 
+                if ((count < 0) || (offset > (_rdLength - count)))
+                    throw new DnsClientException("TXT character-string length exceeds RDATA.");
+
                 characterStrings.Add(new ArraySegment<byte>(_rData, offset, count));
                 offset += count;
             }

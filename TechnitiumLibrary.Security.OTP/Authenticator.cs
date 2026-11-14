@@ -105,6 +105,9 @@ namespace TechnitiumLibrary.Security.OTP
             if (period <= 0)
                 throw new ArgumentOutOfRangeException(nameof(period), "TOTP period must be greater than zero.");
 
+            if (dateTime.Kind == DateTimeKind.Local)
+                dateTime = dateTime.ToUniversalTime();
+
             long t = (long)Math.Floor(((dateTime - DateTime.UnixEpoch).TotalSeconds - t0) / period);
 
             return HOTP(k, t, digits, algorithm);

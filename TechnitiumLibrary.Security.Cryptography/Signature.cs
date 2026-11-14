@@ -82,7 +82,8 @@ namespace TechnitiumLibrary.Security.Cryptography
 
         public bool Verify(Stream data, Certificate[] trustedRootCAs)
         {
-            return Verify(System.Security.Cryptography.HashAlgorithm.Create(_hashAlgo).ComputeHash(data), trustedRootCAs);
+            using (System.Security.Cryptography.HashAlgorithm hash = HashAlgorithms.Create(_hashAlgo))
+                return Verify(hash.ComputeHash(data), trustedRootCAs);
         }
 
         public bool Verify(byte[] hash, Certificate[] trustedRootCAs)

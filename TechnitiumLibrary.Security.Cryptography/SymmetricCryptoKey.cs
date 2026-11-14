@@ -52,7 +52,7 @@ namespace TechnitiumLibrary.Security.Cryptography
 
         public SymmetricCryptoKey(SymmetricEncryptionAlgorithm cryptoAlgo, int keySize, PaddingMode padding = PaddingMode.ISO10126)
         {
-            _symAlgo = SymmetricAlgorithm.Create(cryptoAlgo.ToString());
+            _symAlgo = CreateAlgorithm(cryptoAlgo);
             _symAlgo.KeySize = keySize;
             _symAlgo.Padding = padding;
             _symAlgo.Mode = CipherMode.CBC;
@@ -64,7 +64,7 @@ namespace TechnitiumLibrary.Security.Cryptography
 
         public SymmetricCryptoKey(SymmetricEncryptionAlgorithm cryptoAlgo, byte[] key, byte[] IV = null, PaddingMode padding = PaddingMode.ISO10126)
         {
-            _symAlgo = SymmetricAlgorithm.Create(cryptoAlgo.ToString());
+            _symAlgo = CreateAlgorithm(cryptoAlgo);
             _symAlgo.KeySize = key.Length * 8;
             _symAlgo.Padding = padding;
             _symAlgo.Mode = CipherMode.CBC;
@@ -93,7 +93,7 @@ namespace TechnitiumLibrary.Security.Cryptography
                 case 2:
                     //algorithm
                     _cryptoAlgo = (SymmetricEncryptionAlgorithm)bR.ReadByte();
-                    _symAlgo = SymmetricAlgorithm.Create(_cryptoAlgo.ToString());
+                    _symAlgo = CreateAlgorithm(_cryptoAlgo);
 
                     //key
                     _symAlgo.Key = bR.ReadBytes(bR.ReadByte());
@@ -112,6 +112,34 @@ namespace TechnitiumLibrary.Security.Cryptography
 
                 default:
                     throw new CryptoException("SymmetricCryptoKey format version not supported.");
+            }
+        }
+
+        #endregion
+
+        #region private
+
+        static SymmetricAlgorithm CreateAlgorithm(SymmetricEncryptionAlgorithm cryptoAlgo)
+        {
+            switch (cryptoAlgo)
+            {
+                case SymmetricEncryptionAlgorithm.DES:
+                    return DES.Create();
+
+                case SymmetricEncryptionAlgorithm.RC2:
+                    return RC2.Create();
+
+                case SymmetricEncryptionAlgorithm.TripleDES:
+                    return TripleDES.Create();
+
+                case SymmetricEncryptionAlgorithm.RC4:
+                    return new RC4Managed();
+
+                case SymmetricEncryptionAlgorithm.Rijndael:
+                    return Aes.Create();
+
+                default:
+                    throw new CryptoException("Symmetric encryption algorithm not supported.");
             }
         }
 

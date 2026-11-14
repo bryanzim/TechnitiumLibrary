@@ -130,7 +130,7 @@ namespace TechnitiumLibrary.Net
 
         public static IPAddress GetSubnetMask(int prefixLength)
         {
-            if (prefixLength > 32)
+            if ((prefixLength < 0) || (prefixLength > 32))
                 throw new ArgumentOutOfRangeException(nameof(prefixLength), "Invalid network prefix.");
 
             if (prefixLength == 0)
@@ -151,7 +151,7 @@ namespace TechnitiumLibrary.Net
                         if (prefixLength == 32)
                             return address;
 
-                        if (prefixLength > 32)
+                        if ((prefixLength < 0) || (prefixLength > 32))
                             throw new ArgumentOutOfRangeException(nameof(prefixLength), "Invalid network prefix.");
 
                         Span<byte> addressBytes = stackalloc byte[4];
@@ -175,7 +175,7 @@ namespace TechnitiumLibrary.Net
                         if (prefixLength == 128)
                             return address;
 
-                        if (prefixLength > 128)
+                        if ((prefixLength < 0) || (prefixLength > 128))
                             throw new ArgumentOutOfRangeException(nameof(prefixLength), "Invalid network prefix.");
 
                         Span<byte> addressBytes = stackalloc byte[16];
@@ -481,7 +481,7 @@ namespace TechnitiumLibrary.Net
 
                 for (int i = 0, j = parts.Length - 3; i < 16; i++, j -= 2)
                 {
-                    if (!byte.TryParse(parts[j], NumberStyles.HexNumber, null, out p1) || !byte.TryParse(parts[j - 1], NumberStyles.HexNumber, null, out p2))
+                    if ((parts[j].Length != 1) || (parts[j - 1].Length != 1) || !byte.TryParse(parts[j], NumberStyles.HexNumber, null, out p1) || !byte.TryParse(parts[j - 1], NumberStyles.HexNumber, null, out p2))
                     {
                         address = null;
                         return false;

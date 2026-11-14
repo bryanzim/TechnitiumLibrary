@@ -21,6 +21,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Net;
+using System.Net.Http;
 using System.Net.Sockets;
 using System.Text;
 using System.Xml;
@@ -37,6 +38,8 @@ namespace TechnitiumLibrary.Net.UPnP.Networking
                                                                 "ST:upnp:rootdevice\r\n" +
                                                                 "MAN:\"ssdp:discover\"\r\n" +
                                                                 "MX:3\r\n\r\n");
+
+        readonly static HttpClient _httpClient = new HttpClient();
 
         readonly IPAddress _deviceIP;
         readonly IPAddress _localIP;
@@ -113,11 +116,13 @@ namespace TechnitiumLibrary.Net.UPnP.Networking
                                 //find service URL
                                 XmlDocument desc = new XmlDocument();
 
-                                HttpWebRequest wReq = WebRequest.Create(descriptionUri) as HttpWebRequest;
-                                wReq.KeepAlive = false;
+                                using (UpnpResponse descResponse = Send(HttpMethod.Get, descriptionUri, null, null, null))
+                                {
+                                    if (descResponse.StatusCode != 200)
+                                        throw new InternetGatewayDeviceException("UPnP device returned an HTTP error: (" + descResponse.StatusCode + ") " + descResponse.StatusDescription);
 
-                                using (HttpWebResponse descResponse = (HttpWebResponse)wReq.GetResponse())
                                     desc.Load(descResponse.GetResponseStream());
+                                }
 
                                 XmlNamespaceManager nsMgr = new XmlNamespaceManager(desc.NameTable);
                                 nsMgr.AddNamespace("tns", "urn:schemas-upnp-org:device-1-0");
@@ -191,6 +196,25 @@ namespace TechnitiumLibrary.Net.UPnP.Networking
 
         #region private
 
+        internal static bool ParseBoolean(string value)
+        {
+            switch (value.Trim().ToLowerInvariant())
+            {
+                case "1":
+                case "true":
+                case "yes":
+                    return true;
+
+                case "0":
+                case "false":
+                case "no":
+                    return false;
+
+                default:
+                    throw new FormatException("UPnP boolean is invalid: " + value);
+            }
+        }
+
         static string XmlEscape(string value)
         {
             if (string.IsNullOrEmpty(value))
@@ -199,7 +223,7 @@ namespace TechnitiumLibrary.Net.UPnP.Networking
             return value.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;").Replace("\"", "&quot;").Replace("'", "&apos;");
         }
 
-        private HttpWebResponse SOAPRequest(string SOAP, string functionName)
+        private UpnpResponse SOAPRequest(string SOAP, string functionName)
         {
             Exception exPPP = null;
 
@@ -208,10 +232,6 @@ namespace TechnitiumLibrary.Net.UPnP.Networking
                 try
                 {
                     return SOAPRequest(_controlUrlWanPPP, SOAP, functionName, "WANPPPConnection");
-                }
-                catch (WebException ex)
-                {
-                    exPPP = ex;
                 }
                 catch (InternetGatewayDeviceException ex)
                 {
@@ -225,7 +245,7 @@ namespace TechnitiumLibrary.Net.UPnP.Networking
                 {
                     return SOAPRequest(_controlUrlWanIP, SOAP.Replace("service:WANPPPConnection:1", "service:WANIPConnection:1"), functionName, "WANIPConnection");
                 }
-                catch (WebException ex)
+                catch (InternetGatewayDeviceException ex)
                 {
                     if (exPPP != null)
                         throw new InternetGatewayDeviceException("Server returned an error.", exPPP);
@@ -240,7 +260,7 @@ namespace TechnitiumLibrary.Net.UPnP.Networking
             throw new InternetGatewayDeviceException("No control URL available to make UPnP SOAP request.");
         }
 
-        private static HttpWebResponse SOAPRequest(Uri controlURL, string SOAP, string functionName, string WANService)
+        private static UpnpResponse SOAPRequest(Uri controlURL, string SOAP, string functionName, string WANService)
         {
             string request = "<?xml version=\"1.0\"?>\r\n" +
                             "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">\r\n" +
@@ -250,30 +270,7 @@ namespace TechnitiumLibrary.Net.UPnP.Networking
                             "</s:Envelope>";
 
             byte[] buffer = Encoding.ASCII.GetBytes(request);
-
-            HttpWebRequest wReq = WebRequest.Create(controlURL) as HttpWebRequest;
-            wReq.Method = "POST";
-            wReq.Headers.Add("SOAPACTION", "\"urn:schemas-upnp-org:service:" + WANService + ":1#" + functionName + "\"");
-            wReq.KeepAlive = false;
-            wReq.ContentType = "text/xml; charset=\"utf-8\"";
-            wReq.ContentLength = buffer.Length;
-
-            using (Stream requestStream = wReq.GetRequestStream())
-                requestStream.Write(buffer, 0, buffer.Length);
-
-            HttpWebResponse response;
-
-            try
-            {
-                response = (HttpWebResponse)wReq.GetResponse();
-            }
-            catch (WebException ex)
-            {
-                response = ex.Response as HttpWebResponse;
-            }
-
-            if (response is null)
-                throw new InternetGatewayDeviceException("UPnP device did not return a response.");
+            UpnpResponse response = Send(HttpMethod.Post, controlURL, buffer, "text/xml; charset=\"utf-8\"", "\"urn:schemas-upnp-org:service:" + WANService + ":1#" + functionName + "\"");
 
             try
             {
@@ -361,7 +358,7 @@ namespace TechnitiumLibrary.Net.UPnP.Networking
                                 "<NewLeaseDuration>" + leaseDuration + "</NewLeaseDuration>" +
                            "</u:AddPortMapping>";
 
-            using HttpWebResponse response = SOAPRequest(SOAP, "AddPortMapping");
+            using UpnpResponse response = SOAPRequest(SOAP, "AddPortMapping");
 
             int statusCode = Convert.ToInt32(response.StatusCode);
 
@@ -404,7 +401,7 @@ namespace TechnitiumLibrary.Net.UPnP.Networking
                                 "<NewProtocol>" + protocol.ToString().ToUpper() + "</NewProtocol>" +
                           "</u:DeletePortMapping>";
 
-            using HttpWebResponse response = SOAPRequest(SOAP, "DeletePortMapping");
+            using UpnpResponse response = SOAPRequest(SOAP, "DeletePortMapping");
 
             int statusCode = Convert.ToInt32(response.StatusCode);
 
@@ -425,7 +422,7 @@ namespace TechnitiumLibrary.Net.UPnP.Networking
         {
             string SOAP = "<u:GetExternalIPAddress xmlns:u=\"urn:schemas-upnp-org:service:WANPPPConnection:1\"></u:GetExternalIPAddress>";
 
-            using HttpWebResponse response = SOAPRequest(SOAP, "GetExternalIPAddress");
+            using UpnpResponse response = SOAPRequest(SOAP, "GetExternalIPAddress");
 
             int statusCode = Convert.ToInt32(response.StatusCode);
 
@@ -454,7 +451,7 @@ namespace TechnitiumLibrary.Net.UPnP.Networking
                                 "<NewProtocol>" + protocol.ToString().ToUpper() + "</NewProtocol>" +
                            "</u:GetSpecificPortMappingEntry>";
 
-            HttpWebResponse response;
+            UpnpResponse response;
 
             try
             {
@@ -492,7 +489,7 @@ namespace TechnitiumLibrary.Net.UPnP.Networking
                     XmlNode node4 = xResp.SelectSingleNode("//NewPortMappingDescription/text()", nsMgr);
                     XmlNode node5 = xResp.SelectSingleNode("//NewLeaseDuration/text()", nsMgr);
 
-                    return new PortMappingEntry(Convert.ToInt32(node1.Value), IPAddress.Parse(node2.Value), Convert.ToBoolean(Convert.ToInt32(node3.Value)), node4.Value, Convert.ToInt32(node5.Value));
+                    return new PortMappingEntry(Convert.ToInt32(node1.Value), IPAddress.Parse(node2.Value), ParseBoolean(node3.Value), node4.Value, Convert.ToInt32(node5.Value));
 
                 case 714:
                     //The specified value does not exists in the array
@@ -510,7 +507,7 @@ namespace TechnitiumLibrary.Net.UPnP.Networking
                                 "<NewPortMappingIndex>" + portMappingIndex + "</NewPortMappingIndex>" +
                           "</u:GetGenericPortMappingEntry>";
 
-            HttpWebResponse response;
+            UpnpResponse response;
 
             try
             {
@@ -557,7 +554,7 @@ namespace TechnitiumLibrary.Net.UPnP.Networking
                     XmlNode node7 = xResp.SelectSingleNode("//NewPortMappingDescription/text()", nsMgr);
                     XmlNode node8 = xResp.SelectSingleNode("//NewLeaseDuration/text()", nsMgr);
 
-                    return new GenericPortMappingEntry(RemoteHost, Convert.ToInt32(node2.Value), (ProtocolType)Enum.Parse(typeof(ProtocolType), node3.Value, true), Convert.ToInt32(node4.Value), IPAddress.Parse(node5.Value), Convert.ToBoolean(Convert.ToInt32(node6.Value)), node7.Value, Convert.ToInt32(node8.Value));
+                    return new GenericPortMappingEntry(RemoteHost, Convert.ToInt32(node2.Value), (ProtocolType)Enum.Parse(typeof(ProtocolType), node3.Value, true), Convert.ToInt32(node4.Value), IPAddress.Parse(node5.Value), ParseBoolean(node6.Value), node7.Value, Convert.ToInt32(node8.Value));
 
                 case 713:
                     //The specified array index is out of bound
@@ -612,5 +609,74 @@ namespace TechnitiumLibrary.Net.UPnP.Networking
         { get { return _localIP; } }
 
         #endregion
+
+        static UpnpResponse Send(HttpMethod method, Uri uri, byte[] body, string contentType, string soapAction)
+        {
+            using (HttpRequestMessage request = new HttpRequestMessage(method, uri))
+            {
+                request.Headers.ConnectionClose = true;
+
+                if (soapAction != null)
+                    request.Headers.TryAddWithoutValidation("SOAPACTION", soapAction);
+
+                if (body != null)
+                {
+                    request.Content = new ByteArrayContent(body);
+                    request.Content.Headers.TryAddWithoutValidation("Content-Type", contentType);
+                }
+
+                try
+                {
+                    using (HttpResponseMessage response = _httpClient.Send(request))
+                    {
+                        using (Stream stream = response.Content.ReadAsStream())
+                        {
+                            using (MemoryStream copy = new MemoryStream())
+                            {
+                                stream.CopyTo(copy);
+                                return new UpnpResponse((int)response.StatusCode, response.ReasonPhrase ?? "", copy.ToArray());
+                            }
+                        }
+                    }
+                }
+                catch (HttpRequestException)
+                {
+                    throw new InternetGatewayDeviceException("UPnP device did not return a response.");
+                }
+                catch (OperationCanceledException)
+                {
+                    throw new InternetGatewayDeviceException("UPnP device did not return a response.");
+                }
+            }
+        }
+
+        sealed class UpnpResponse : IDisposable
+        {
+            readonly MemoryStream _body;
+
+            public UpnpResponse(int statusCode, string statusDescription, byte[] body)
+            {
+                StatusCode = statusCode;
+                StatusDescription = statusDescription;
+                _body = new MemoryStream(body, false);
+            }
+
+            public int StatusCode
+            { get; }
+
+            public string StatusDescription
+            { get; }
+
+            public Stream GetResponseStream()
+            {
+                _body.Position = 0;
+                return _body;
+            }
+
+            public void Dispose()
+            {
+                _body.Dispose();
+            }
+        }
     }
 }

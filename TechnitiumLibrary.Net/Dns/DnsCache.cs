@@ -38,13 +38,15 @@ namespace TechnitiumLibrary.Net.Dns
 
         readonly static DnsCacheEntry ROOT_CACHE_ENTRY = DnsCacheEntry.GetRootCacheEntry();
 
-        const uint FAILURE_RECORD_TTL = 60u;
+        const uint FAILURE_RECORD_TTL = 10u;
+        public const uint FAILURE_RECORD_TTL_MIN = 1u;
+        public const uint FAILURE_RECORD_TTL_MAX = 300u;
         const uint NEGATIVE_RECORD_TTL = 300u;
         const uint MINIMUM_RECORD_TTL = 10u;
         const uint MAXIMUM_RECORD_TTL = 3600u;
-        const uint SERVE_STALE_TTL = 0u;
+        const uint SERVE_STALE_TTL = 0u; //serve stale not supported directly
         const uint SERVE_STALE_TTL_MAX = 7 * 24 * 60 * 60; //7 days cap on serve stale
-        const uint SERVE_STALE_ANSWER_TTL = 30u;
+        const uint SERVE_STALE_ANSWER_TTL = 30u; //as per https://www.rfc-editor.org/rfc/rfc8767.html suggestion
         const uint SERVE_STALE_ANSWER_TTL_MAX = 300; //5 mins
 
         uint _failureRecordTtl;
@@ -69,7 +71,7 @@ namespace TechnitiumLibrary.Net.Dns
 
         protected DnsCache(uint failureRecordTtl, uint negativeRecordTtl, uint minimumRecordTtl, uint maximumRecordTtl, uint serveStaleTtl, uint serveStaleAnswerTtl)
         {
-            _failureRecordTtl = failureRecordTtl;
+            FailureRecordTtl = failureRecordTtl;
             _negativeRecordTtl = negativeRecordTtl;
             _minimumRecordTtl = minimumRecordTtl;
             _maximumRecordTtl = maximumRecordTtl;
@@ -567,7 +569,7 @@ namespace TechnitiumLibrary.Net.Dns
                 foreach (DnsQuestionRecord question in response.Question)
                 {
                     DnsResourceRecord record = new DnsResourceRecord(question.Name, question.Type, question.Class, _failureRecordTtl, new DnsSpecialCacheRecordData(DnsSpecialCacheRecordType.BadCache, response));
-                    record.SetExpiry(_minimumRecordTtl, _maximumRecordTtl, _serveStaleTtl, _serveStaleAnswerTtl);
+                    record.SetExpiry(FAILURE_RECORD_TTL_MIN, FAILURE_RECORD_TTL_MAX, _serveStaleTtl, _serveStaleAnswerTtl);
 
                     InternalCacheRecords(new DnsResourceRecord[] { record }, eDnsClientSubnet, response.Metadata);
                 }
@@ -615,7 +617,7 @@ namespace TechnitiumLibrary.Net.Dns
                     foreach (DnsQuestionRecord question in response.Question)
                     {
                         DnsResourceRecord record = new DnsResourceRecord(question.Name, question.Type, question.Class, _failureRecordTtl, new DnsSpecialCacheRecordData(DnsSpecialCacheRecordType.FailureCache, response));
-                        record.SetExpiry(_minimumRecordTtl, _maximumRecordTtl, _serveStaleTtl, _serveStaleAnswerTtl);
+                        record.SetExpiry(FAILURE_RECORD_TTL_MIN, FAILURE_RECORD_TTL_MAX, _serveStaleTtl, _serveStaleAnswerTtl);
 
                         InternalCacheRecords(new DnsResourceRecord[] { record }, eDnsClientSubnet, response.Metadata);
                     }
@@ -898,7 +900,7 @@ namespace TechnitiumLibrary.Net.Dns
                                 break;
                         }
                     }
-                    else if ((answer.Type == DnsResourceRecordType.DNAME) && DnsDatagram.EndsWithIgnoreCaseAscii(qName, "." + answer.Name))
+                    else if ((answer.Type == DnsResourceRecordType.DNAME) && DnsDatagram.IsNameUnder(qName, answer.Name))
                     {
                         cachableRecords.Add(answer);
                     }
@@ -1134,7 +1136,13 @@ namespace TechnitiumLibrary.Net.Dns
         public uint FailureRecordTtl
         {
             get { return _failureRecordTtl; }
-            set { _failureRecordTtl = value; }
+            set
+            {
+                if ((value < FAILURE_RECORD_TTL_MIN) || (value > FAILURE_RECORD_TTL_MAX))
+                    throw new ArgumentOutOfRangeException(nameof(FailureRecordTtl), $"Valid range is from {FAILURE_RECORD_TTL_MIN} to {FAILURE_RECORD_TTL_MAX} seconds.");
+
+                _failureRecordTtl = value;
+            }
         }
 
         public uint NegativeRecordTtl
@@ -1985,6 +1993,8 @@ namespace TechnitiumLibrary.Net.Dns
             {
                 if (_glueRecords is null)
                     _glueRecords = new List<DnsResourceRecord>(2);
+                else if (_glueRecords.Contains(glueRecord))
+                    return;
 
                 _glueRecords.Add(glueRecord);
             }
@@ -1993,6 +2003,8 @@ namespace TechnitiumLibrary.Net.Dns
             {
                 if (_rrsigRecords is null)
                     _rrsigRecords = new List<DnsResourceRecord>(1);
+                else if (_rrsigRecords.Contains(rrsigRecord))
+                    return;
 
                 _rrsigRecords.Add(rrsigRecord);
             }
@@ -2001,6 +2013,8 @@ namespace TechnitiumLibrary.Net.Dns
             {
                 if (_nsecRecords is null)
                     _nsecRecords = new List<DnsResourceRecord>(2);
+                else if (_nsecRecords.Contains(nsecRecord))
+                    return;
 
                 _nsecRecords.Add(nsecRecord);
             }

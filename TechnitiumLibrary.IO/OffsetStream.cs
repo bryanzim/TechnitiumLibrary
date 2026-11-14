@@ -97,6 +97,9 @@ namespace TechnitiumLibrary.IO
             }
             set
             {
+                if (value < 0)
+                    throw new ArgumentOutOfRangeException(nameof(value));
+
                 if (_readOnly && (value > _length))
                     throw new EndOfStreamException();
 
@@ -129,16 +132,19 @@ namespace TechnitiumLibrary.IO
 
         public override int Read(byte[] buffer, int offset, int count)
         {
-            if (count < 1)
+            if (count < 0)
+                throw new ArgumentOutOfRangeException(nameof(count));
+
+            if (count == 0)
                 return 0;
 
             if (_position >= _length)
                 return 0;
 
-            int available = Convert.ToInt32(_length - _position);
+            long available = _length - _position;
 
             if (count > available)
-                count = available;
+                count = (int)available;
 
             if (_stream.CanSeek)
                 _stream.Position = _offset + _position;
@@ -151,16 +157,19 @@ namespace TechnitiumLibrary.IO
 
         public override async Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
         {
-            if (count < 1)
+            if (count < 0)
+                throw new ArgumentOutOfRangeException(nameof(count));
+
+            if (count == 0)
                 return 0;
 
             if (_position >= _length)
                 return 0;
 
-            int available = Convert.ToInt32(_length - _position);
+            long available = _length - _position;
 
             if (count > available)
-                count = available;
+                count = (int)available;
 
             if (_stream.CanSeek)
                 _stream.Position = _offset + _position;
@@ -179,10 +188,10 @@ namespace TechnitiumLibrary.IO
             if (_position >= _length)
                 return 0;
 
-            int available = Convert.ToInt32(_length - _position);
+            long available = _length - _position;
 
             if (buffer.Length > available)
-                buffer = buffer.Slice(0, available);
+                buffer = buffer.Slice(0, (int)available);
 
             if (_stream.CanSeek)
                 _stream.Position = _offset + _position;

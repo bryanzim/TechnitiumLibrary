@@ -102,32 +102,13 @@ namespace TechnitiumLibrary.Security.Cryptography
                 if ((numberLenBytes < 1) || (numberLenBytes > 4))
                     throw new IOException("DER encoding length not supported.");
 
-                byte[] valueBytes = new byte[4];
+                byte[] valueBytes = new byte[numberLenBytes];
                 s.ReadExactly(valueBytes, 0, numberLenBytes);
 
-                switch (numberLenBytes)
-                {
-                    case 1:
-                        valueLength = valueBytes[0];
-                        break;
+                valueLength = 0;
 
-                    case 2:
-                        valueLength = (valueBytes[0] << 8) | valueBytes[1];
-                        break;
-
-                    case 3:
-                        Array.Reverse(valueBytes, 0, 3);
-                        valueLength = BitConverter.ToInt32(valueBytes, 0);
-                        break;
-
-                    case 4:
-                        Array.Reverse(valueBytes, 0, 4);
-                        valueLength = BitConverter.ToInt32(valueBytes, 0);
-                        break;
-
-                    default:
-                        throw new IOException("DER encoding length not supported.");
-                }
+                for (int i = 0; i < numberLenBytes; i++)
+                    valueLength = (valueLength << 8) | valueBytes[i];
 
                 if (valueLength < 0)
                     throw new IOException("DER encoding length not supported.");
@@ -155,18 +136,19 @@ namespace TechnitiumLibrary.Security.Cryptography
             }
             else
             {
-                byte[] bytesValueLength = BitConverter.GetBytes(valueLength);
-                Array.Reverse(bytesValueLength);
+                int lengthByteCount = 0;
+                int remainingLength = valueLength;
 
-                for (int i = 0; i < bytesValueLength.Length; i++)
+                while (remainingLength > 0)
                 {
-                    if (bytesValueLength[i] != 0)
-                    {
-                        s.WriteByte((byte)(0x80 | (bytesValueLength.Length - i)));
-                        s.Write(bytesValueLength, i, bytesValueLength.Length - i);
-                        break;
-                    }
+                    lengthByteCount++;
+                    remainingLength >>= 8;
                 }
+
+                s.WriteByte((byte)(0x80 | lengthByteCount));
+
+                for (int shift = (lengthByteCount - 1) * 8; shift >= 0; shift -= 8)
+                    s.WriteByte((byte)(valueLength >> shift));
             }
 
             s.Write(value, 0, valueLength);
@@ -174,16 +156,33 @@ namespace TechnitiumLibrary.Security.Cryptography
 
         public static void EncodeIntegerValue(byte[] value, Stream s)
         {
-            if ((value[0] & 0x80) > 0)
+            if ((value is null) || (value.Length == 0))
+                throw new ArgumentException("DER integer value is empty.", nameof(value));
+
+            int start = 0;
+
+            while ((start < (value.Length - 1)) && (value[start] == 0) && ((value[start + 1] & 0x80) == 0))
+                start++;
+
+            int contentLength = value.Length - start;
+
+            if ((value[start] & 0x80) > 0)
             {
-                byte[] valInt = new byte[value.Length + 1];
-                Buffer.BlockCopy(value, 0, valInt, 1, value.Length);
+                byte[] valInt = new byte[contentLength + 1];
+                Buffer.BlockCopy(value, start, valInt, 1, contentLength);
 
                 Encode(DEREncodingASN1Type.INTEGER, valInt, s);
             }
-            else
+            else if (start == 0)
             {
                 Encode(DEREncodingASN1Type.INTEGER, value, s);
+            }
+            else
+            {
+                byte[] valInt = new byte[contentLength];
+                Buffer.BlockCopy(value, start, valInt, 0, contentLength);
+
+                Encode(DEREncodingASN1Type.INTEGER, valInt, s);
             }
         }
 

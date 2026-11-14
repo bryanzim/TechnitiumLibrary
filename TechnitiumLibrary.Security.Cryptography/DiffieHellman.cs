@@ -112,27 +112,30 @@ namespace TechnitiumLibrary.Security.Cryptography
             if (opPublicKey.G != _g)
                 throw new CryptoException("DiffieHellman public key parameter G doesn't match.");
 
-            HashAlgorithm hash;
+            string hashAlgorithm;
 
             switch (base.KeyDerivationHashAlgorithm)
             {
                 case KeyAgreementKeyDerivationHashAlgorithm.SHA256:
-                    hash = HashAlgorithm.Create("SHA256");
+                    hashAlgorithm = "SHA256";
                     break;
 
                 case KeyAgreementKeyDerivationHashAlgorithm.SHA384:
-                    hash = HashAlgorithm.Create("SHA384");
+                    hashAlgorithm = "SHA384";
                     break;
 
                 case KeyAgreementKeyDerivationHashAlgorithm.SHA512:
-                    hash = HashAlgorithm.Create("SHA512");
+                    hashAlgorithm = "SHA512";
                     break;
 
                 default:
                     throw new CryptoException("Hash algorithm not supported.");
             }
 
-            return hash.ComputeHash(BigInteger.ModPow(opPublicKey.X, _privateKey, _p).ToByteArray());
+            using (HashAlgorithm hash = HashAlgorithms.Create(hashAlgorithm))
+            {
+                return hash.ComputeHash(BigInteger.ModPow(opPublicKey.X, _privateKey, _p).ToByteArray());
+            }
         }
 
         #endregion

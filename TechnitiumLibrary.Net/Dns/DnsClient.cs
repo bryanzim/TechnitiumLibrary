@@ -601,7 +601,8 @@ namespace TechnitiumLibrary.Net.Dns
                 //query cache
                 {
                     //query cache without CD flag to not get response from "bad cache" and DO flag, if validation is enabled, to get DNSSEC records for correctly reading DS from response
-                    DnsDatagram cacheRequest = new DnsDatagram(0, false, DnsOpcode.StandardQuery, false, false, true, false, false, false, DnsResponseCode.NoError, [question], null, null, null, udpPayloadSize, dnssecValidation ? EDnsHeaderFlags.DNSSEC_OK : EDnsHeaderFlags.None, resolverStack.Count == 0 ? eDnsClientSubnetOption : null);
+                    DnsQuestionRecord cacheQuestion = new DnsQuestionRecord(question.Name, question.Type, question.Class, false); //use cloned question for querying cache so that QNAME minimization is disabled and does not cause queries being sent for minimized name due to conditional forwarding at DNS server
+                    DnsDatagram cacheRequest = new DnsDatagram(0, false, DnsOpcode.StandardQuery, false, false, true, false, false, false, DnsResponseCode.NoError, [cacheQuestion], null, null, null, udpPayloadSize, dnssecValidation ? EDnsHeaderFlags.DNSSEC_OK : EDnsHeaderFlags.None, resolverStack.Count == 0 ? eDnsClientSubnetOption : null);
                     DnsDatagram cacheResponse = await cache.QueryAsync(cacheRequest, findClosestNameServers: true);
                     if (cacheResponse is not null)
                     {
@@ -1229,6 +1230,8 @@ namespace TechnitiumLibrary.Net.Dns
                                             if (authorityRecord.Name.Contains('.')) //avoid marking root and TLD name servers
                                                 response.Metadata?.NameServer?.Metadata.MarkMisconfigured();
 
+                                            extendedDnsErrors.Add(new EDnsExtendedDnsErrorOptionData(EDnsExtendedDnsErrorCode.NoReachableAuthority, ((response.Metadata is null) || (response.Metadata.NameServer is null) ? "name server" : response.Metadata.NameServer.ToString()) + " returned lame delegation for " + question.ToString() + " at delegation " + zoneCut + "."));
+
                                             throw new DnsClientResponseNotPreferredException(response);
                                         }
                                     }
@@ -1331,7 +1334,7 @@ namespace TechnitiumLibrary.Net.Dns
                         }
 
                         //add any previous extended dns errors for caching
-                        if ((response.RCODE != DnsResponseCode.NoError) && (extendedDnsErrors.Count > 0))
+                        if (((response.RCODE != DnsResponseCode.NoError) || (response.Answer.Count == 0)) && (extendedDnsErrors.Count > 0))
                             response.AddDnsClientExtendedErrors(extendedDnsErrors);
 
                         //cache response
@@ -1355,7 +1358,7 @@ namespace TechnitiumLibrary.Net.Dns
                                         {
                                             foreach (DnsResourceRecord answer in response.Answer)
                                             {
-                                                if ((answer.Type == DnsResourceRecordType.DNAME) && DnsDatagram.EndsWithIgnoreCaseAscii(question.Name, "." + answer.Name))
+                                                if ((answer.Type == DnsResourceRecordType.DNAME) && DnsDatagram.IsNameUnder(question.Name, answer.Name))
                                                 {
                                                     foundDNAME = true;
                                                     break;
@@ -2924,9 +2927,11 @@ namespace TechnitiumLibrary.Net.Dns
                                     {
                                         case DnssecProofOfNonExistence.OptOut:
                                         case DnssecProofOfNonExistence.NxDomain:
-                                        case DnssecProofOfNonExistence.UnsupportedNSEC3IterationsValue:
                                             //record does not exists so wildcard is valid
                                             break;
+
+                                        case DnssecProofOfNonExistence.UnsupportedNSEC3IterationsValue:
+                                            throw new DnsClientResponseDnssecValidationException("DNSSEC validation failed because the NSEC3 iterations value is not supported for owner name: " + rrsigRecord.Name.ToLowerInvariant() + ". " + typeCovered.ToString() + " " + rrsigRecord.Class.ToString(), response);
 
                                         case DnssecProofOfNonExistence.TooManyNsec3HashOperations:
                                             response.AddDnsClientExtendedError(EDnsExtendedDnsErrorCode.TooManyCryptoValidations, "Attack detected! Too many NSEC3 hash operations for " + rrsigRecord.Name.ToLowerInvariant() + ". " + typeCovered.ToString() + " " + rrsigRecord.Class.ToString());
@@ -2969,9 +2974,11 @@ namespace TechnitiumLibrary.Net.Dns
                                             case DnssecProofOfNonExistence.OptOut:
                                             case DnssecProofOfNonExistence.NoData:
                                             case DnssecProofOfNonExistence.InsecureDelegation: //proves no DS record exists
-                                            case DnssecProofOfNonExistence.UnsupportedNSEC3IterationsValue:
                                                 //no data for the type was found
                                                 break;
+
+                                            case DnssecProofOfNonExistence.UnsupportedNSEC3IterationsValue:
+                                                throw new DnsClientResponseDnssecValidationException("DNSSEC validation failed because the NSEC3 iterations value is not supported for owner name: " + qname + ". " + question.Type.ToString() + " " + question.Class.ToString(), response);
 
                                             case DnssecProofOfNonExistence.TooManyNsec3HashOperations:
                                                 response.AddDnsClientExtendedError(EDnsExtendedDnsErrorCode.TooManyCryptoValidations, "Attack detected! Too many NSEC3 hash operations for " + qname + ". " + question.Type.ToString() + " " + question.Class.ToString());
@@ -3051,9 +3058,11 @@ namespace TechnitiumLibrary.Net.Dns
                             {
                                 case DnssecProofOfNonExistence.OptOut:
                                 case DnssecProofOfNonExistence.NxDomain:
-                                case DnssecProofOfNonExistence.UnsupportedNSEC3IterationsValue:
                                     //domain does not exists or could not prove it exists due to opt-opt
                                     break;
+
+                                case DnssecProofOfNonExistence.UnsupportedNSEC3IterationsValue:
+                                    throw new DnsClientResponseDnssecValidationException("DNSSEC validation failed because the NSEC3 iterations value is not supported for owner name: " + qname + ". " + question.Type.ToString() + " " + question.Class.ToString(), response);
 
                                 case DnssecProofOfNonExistence.TooManyNsec3HashOperations:
                                     response.AddDnsClientExtendedError(EDnsExtendedDnsErrorCode.TooManyCryptoValidations, "Attack detected! Too many NSEC3 hash operations for " + qname + ". " + question.Type.ToString() + " " + question.Class.ToString());
@@ -3300,7 +3309,7 @@ namespace TechnitiumLibrary.Net.Dns
                                         if (dnameRecord.Type != DnsResourceRecordType.DNAME)
                                             continue;
 
-                                        if (DnsDatagram.EndsWithIgnoreCaseAscii(cnameRecord.Name, "." + dnameRecord.Name))
+                                        if (DnsDatagram.IsNameUnder(cnameRecord.Name, dnameRecord.Name))
                                         {
                                             string synthesizedCNAME = (dnameRecord.RDATA as DnsDNAMERecordData).Substitute(cnameRecord.Name, dnameRecord.Name);
                                             string CNAME = (cnameRecord.RDATA as DnsCNAMERecordData).Domain;
@@ -3990,7 +3999,10 @@ namespace TechnitiumLibrary.Net.Dns
 
             foreach (string unsignedZone in unsignedZones)
             {
-                if (DnsDatagram.EqualsIgnoreCaseAscii(domain, unsignedZone) || DnsDatagram.EndsWithIgnoreCaseAscii(domain, "." + unsignedZone))
+                if (unsignedZone is null)
+                    continue;
+
+                if ((unsignedZone.Length == 0) || DnsDatagram.EqualsIgnoreCaseAscii(domain, unsignedZone) || DnsDatagram.IsNameUnder(domain, unsignedZone))
                     return true;
             }
 
@@ -4040,7 +4052,7 @@ namespace TechnitiumLibrary.Net.Dns
                                     break;
                             }
                         }
-                        else if ((answer.Type == DnsResourceRecordType.DNAME) && DnsDatagram.EndsWithIgnoreCaseAscii(qName, "." + answer.Name))
+                        else if ((answer.Type == DnsResourceRecordType.DNAME) && DnsDatagram.IsNameUnder(qName, answer.Name))
                         {
                             //found DNAME
                             newAnswers.Add(answer);

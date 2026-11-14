@@ -491,7 +491,7 @@ namespace TechnitiumLibrary.Net.Dns
             s.WriteByte(0);
         }
 
-        public static string DeserializeDomainName(Stream s, int maxDepth = 10, bool ignoreMissingNullTermination = false, bool isEmailAddress = false)
+        public static string DeserializeDomainName(Stream s, int maxDepth = 10, bool ignoreMissingNullTermination = false, bool isEmailAddress = false, bool allowCompression = true)
         {
             if (maxDepth < 0)
                 throw new DnsClientException("Error while reading domain name: max depth for decompression reached");
@@ -509,6 +509,9 @@ namespace TechnitiumLibrary.Net.Dns
             {
                 if ((labelLength & 0xC0) == 0xC0)
                 {
+                    if (!allowCompression)
+                        throw new DnsClientException("Error while reading domain name: compression pointer is not allowed.");
+
                     int secondByte = s.ReadByte();
                     if (secondByte < 0)
                         throw new EndOfStreamException();
@@ -521,7 +524,7 @@ namespace TechnitiumLibrary.Net.Dns
                     long currentPosition = s.Position;
                     s.Position = offset;
 
-                    string domainSuffix = DeserializeDomainName(s, maxDepth - 1, ignoreMissingNullTermination, isEmailAddress);
+                    string domainSuffix = DeserializeDomainName(s, maxDepth - 1, ignoreMissingNullTermination, isEmailAddress, allowCompression);
                     int suffixWireLength = domainSuffix.Length == 0 ? 1 : domainSuffix.Length + 2;
                     if (uncompressedLength + suffixWireLength > 255)
                         throw new DnsClientException("Error while reading domain name: domain name length cannot exceed 255 bytes.");
@@ -646,6 +649,17 @@ namespace TechnitiumLibrary.Net.Dns
                 return false;
 
             return EqualsIgnoreCaseAscii(name.AsSpan(name.Length - suffix.Length), suffix.AsSpan());
+        }
+
+        public static bool IsNameUnder(string name, string zone)
+        {
+            if ((name is null) || (zone is null))
+                return false;
+
+            if (zone.Length == 0)
+                return name.Length > 0;
+
+            return EndsWithIgnoreCaseAscii(name, "." + zone);
         }
 
         public static int GetHashCodeIgnoreCaseAscii(string value)
@@ -848,17 +862,22 @@ namespace TechnitiumLibrary.Net.Dns
             if (_edns is null)
                 throw new InvalidOperationException();
 
-            DnsResourceRecord newOptRecord = DnsDatagramEdns.GetOPTFor(_edns.UdpPayloadSize, _edns.ExtendedRCODE, _edns.Version, _edns.Flags, options);
+            return CloneWithEDnsOptions(_edns.UdpPayloadSize, _edns.ExtendedRCODE, _edns.Version, _edns.Flags, options);
+        }
+
+        public DnsDatagram CloneWithEDnsOptions(ushort udpPayloadSize, DnsResponseCode extendedRCODE, byte version, EDnsHeaderFlags flags, IReadOnlyList<EDnsOption> options)
+        {
+            DnsResourceRecord newOptRecord = DnsDatagramEdns.GetOPTFor(udpPayloadSize, extendedRCODE, version, flags, options);
 
             IReadOnlyList<DnsResourceRecord> newAdditional;
 
-            if (_additional.Count == 1)
+            if ((_additional.Count == 1) && (_additional[0].Type == DnsResourceRecordType.OPT))
             {
                 newAdditional = [newOptRecord];
             }
             else
             {
-                List<DnsResourceRecord> newAdditionalList = new List<DnsResourceRecord>(_additional.Count - 1)
+                List<DnsResourceRecord> newAdditionalList = new List<DnsResourceRecord>(_additional.Count + 1)
                 {
                     newOptRecord
                 };
@@ -1601,7 +1620,9 @@ namespace TechnitiumLibrary.Net.Dns
             }
 
             byte[] computedMac = ComputeTsigRequestMac(key.KeyName, key.AlgorithmName, tsig.TimeSigned, tsig.Fudge, tsig.Error, tsig.OtherData, key.SharedSecret, tsig.MAC.Length);
-            if (!computedMac.SequenceEqual(tsig.MAC))
+
+            // Use fixed-time comparison to avoid timing-dependent MAC verification.
+            if (!CryptographicOperations.FixedTimeEquals(computedMac, tsig.MAC))
             {
                 unsignedRequest = null;
 
@@ -1614,11 +1635,9 @@ namespace TechnitiumLibrary.Net.Dns
             }
 
             //Check time values
-            DateTime startTime = DateTime.UnixEpoch.AddSeconds(tsig.TimeSigned - tsig.Fudge);
-            DateTime endTime = DateTime.UnixEpoch.AddSeconds(tsig.TimeSigned + tsig.Fudge);
             DateTime utcNow = DateTime.UtcNow;
 
-            if ((utcNow < startTime) || (utcNow > endTime))
+            if (!IsTsigTimeValid(tsig.TimeSigned, tsig.Fudge, utcNow))
             {
                 unsignedRequest = null;
 
@@ -1867,7 +1886,9 @@ namespace TechnitiumLibrary.Net.Dns
             DnsResourceRecord requestTsigRecord = signedRequest._additional[signedRequest._additional.Count - 1];
 
             byte[] computedMac = ComputeTsigResponseMac(requestTsigRecord, key.KeyName, key.AlgorithmName, tsig.TimeSigned, tsig.Fudge, tsig.Error, tsig.OtherData, key.SharedSecret, tsig.MAC.Length);
-            if (!computedMac.SequenceEqual(tsig.MAC))
+
+            // Use fixed-time comparison to avoid timing-dependent MAC verification.
+            if (!CryptographicOperations.FixedTimeEquals(computedMac, tsig.MAC))
             {
                 unsignedResponse = null;
                 requestFailed = false;
@@ -1994,7 +2015,9 @@ namespace TechnitiumLibrary.Net.Dns
                     }
 
                     byte[] currentComputedMac = ComputeTsigNextResponseMac(priorTsig, dnsMessages, currentTsig.TimeSigned, currentTsig.Fudge, key.SharedSecret, currentTsig.MAC.Length);
-                    if (!currentComputedMac.SequenceEqual(currentTsig.MAC))
+
+                    // Use fixed-time comparison to avoid timing-dependent MAC verification.
+                    if (!CryptographicOperations.FixedTimeEquals(currentComputedMac, currentTsig.MAC))
                     {
                         unsignedResponse = null;
                         requestFailed = false;

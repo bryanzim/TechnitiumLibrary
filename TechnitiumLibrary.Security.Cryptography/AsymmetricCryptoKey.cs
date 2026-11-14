@@ -161,7 +161,7 @@ namespace TechnitiumLibrary.Security.Cryptography
                     {
                         rsa.PersistKeyInCsp = false;
                         rsa.FromXmlString(publicKey);
-                        return rsa.Encrypt(data, false);
+                        return rsa.Encrypt(data, RSAEncryptionPadding.Pkcs1);
                     }
 
                 default:
@@ -178,7 +178,7 @@ namespace TechnitiumLibrary.Security.Cryptography
                     {
                         rsa.PersistKeyInCsp = false;
                         rsa.FromXmlString(privateKey);
-                        return rsa.Decrypt(data, false);
+                        return rsa.Decrypt(data, RSAEncryptionPadding.Pkcs1);
                     }
 
                 default:
@@ -188,7 +188,7 @@ namespace TechnitiumLibrary.Security.Cryptography
 
         public static bool Verify(Stream data, byte[] signedHash, string hashAlgo, Certificate signingCert)
         {
-            using (HashAlgorithm hash = HashAlgorithm.Create(hashAlgo))
+            using (HashAlgorithm hash = HashAlgorithms.Create(hashAlgo))
             {
                 return Verify(hash.ComputeHash(data), signedHash, hashAlgo, signingCert.PublicKeyEncryptionAlgorithm, signingCert.PublicKeyXML);
             }
@@ -201,7 +201,7 @@ namespace TechnitiumLibrary.Security.Cryptography
 
         public static bool Verify(Stream data, byte[] signedHash, string hashAlgo, AsymmetricEncryptionAlgorithm cryptoAlgo, string publicKey)
         {
-            using (HashAlgorithm hash = HashAlgorithm.Create(hashAlgo))
+            using (HashAlgorithm hash = HashAlgorithms.Create(hashAlgo))
             {
                 return Verify(hash.ComputeHash(data), signedHash, hashAlgo, cryptoAlgo, publicKey);
             }
@@ -237,7 +237,7 @@ namespace TechnitiumLibrary.Security.Cryptography
 
         public static byte[] Sign(Stream data, string hashAlgo, AsymmetricEncryptionAlgorithm cryptoAlgo, string privateKey)
         {
-            using (HashAlgorithm hash = HashAlgorithm.Create(hashAlgo))
+            using (HashAlgorithm hash = HashAlgorithms.Create(hashAlgo))
             {
                 return Sign(hash.ComputeHash(data), hashAlgo, cryptoAlgo, privateKey);
             }
@@ -311,7 +311,7 @@ namespace TechnitiumLibrary.Security.Cryptography
             switch (_cryptoAlgo)
             {
                 case AsymmetricEncryptionAlgorithm.RSA:
-                    return (_asymAlgo as RSACryptoServiceProvider).Encrypt(data, false);
+                    return (_asymAlgo as RSACryptoServiceProvider).Encrypt(data, RSAEncryptionPadding.Pkcs1);
 
                 default:
                     throw new NotImplementedException("Feature not implemented for specified algorithm.");
@@ -323,7 +323,7 @@ namespace TechnitiumLibrary.Security.Cryptography
             switch (_cryptoAlgo)
             {
                 case AsymmetricEncryptionAlgorithm.RSA:
-                    return (_asymAlgo as RSACryptoServiceProvider).Decrypt(data, false);
+                    return (_asymAlgo as RSACryptoServiceProvider).Decrypt(data, RSAEncryptionPadding.Pkcs1);
 
                 default:
                     throw new NotImplementedException("Feature not implemented for specified algorithm.");
@@ -332,7 +332,7 @@ namespace TechnitiumLibrary.Security.Cryptography
 
         public bool Verify(Stream data, byte[] signedHash, string hashAlgo)
         {
-            using (HashAlgorithm hash = HashAlgorithm.Create(hashAlgo))
+            using (HashAlgorithm hash = HashAlgorithms.Create(hashAlgo))
             {
                 return Verify(hash.ComputeHash(data), signedHash, hashAlgo);
             }
@@ -357,7 +357,7 @@ namespace TechnitiumLibrary.Security.Cryptography
 
         public byte[] Sign(Stream data, string hashAlgo)
         {
-            using (HashAlgorithm hash = HashAlgorithm.Create(hashAlgo))
+            using (HashAlgorithm hash = HashAlgorithms.Create(hashAlgo))
             {
                 return Sign(hash.ComputeHash(data), hashAlgo);
             }

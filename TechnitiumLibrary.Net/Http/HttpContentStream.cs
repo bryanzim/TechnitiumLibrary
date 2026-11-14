@@ -136,6 +136,12 @@ namespace TechnitiumLibrary.Net.Http
 
         public override int Read(byte[] buffer, int offset, int count)
         {
+            if (count < 0)
+                throw new ArgumentOutOfRangeException(nameof(count));
+
+            if (count == 0)
+                return 0;
+
             while (true)
             {
                 //read from buffer
@@ -176,6 +182,12 @@ namespace TechnitiumLibrary.Net.Http
 
         public override async Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
         {
+            if (count < 0)
+                throw new ArgumentOutOfRangeException(nameof(count));
+
+            if (count == 0)
+                return 0;
+
             while (true)
             {
                 cancellationToken.ThrowIfCancellationRequested();

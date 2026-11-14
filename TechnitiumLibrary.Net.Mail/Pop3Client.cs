@@ -276,6 +276,8 @@ namespace TechnitiumLibrary.Net.Mail
             while (true)
             {
                 string tmp = _sR.ReadLine();
+                if (tmp == null)
+                    throw new EndOfStreamException();
                 if (tmp == ".")
                     break;
 

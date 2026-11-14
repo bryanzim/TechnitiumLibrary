@@ -42,6 +42,7 @@ namespace TechnitiumLibrary.Net.Dns
 
         string _originDomain;
         uint _defaultTtl;
+        bool _defaultTtlSpecified;
 
         string _line;
         uint _lineNo;
@@ -169,27 +170,37 @@ namespace TechnitiumLibrary.Net.Dns
                     {
                         case 's':
                         case 'S':
-                            ttl += number;
+                            if (!TryAddTtl(ref ttl, number, 1))
+                                return false;
+
                             break;
 
                         case 'm':
                         case 'M':
-                            ttl += number * 60;
+                            if (!TryAddTtl(ref ttl, number, MINUTE))
+                                return false;
+
                             break;
 
                         case 'h':
                         case 'H':
-                            ttl += number * 60 * 60;
+                            if (!TryAddTtl(ref ttl, number, HOUR))
+                                return false;
+
                             break;
 
                         case 'd':
                         case 'D':
-                            ttl += number * 24 * 60 * 60;
+                            if (!TryAddTtl(ref ttl, number, DAY))
+                                return false;
+
                             break;
 
                         case 'w':
                         case 'W':
-                            ttl += number * 7 * 24 * 60 * 60;
+                            if (!TryAddTtl(ref ttl, number, WEEK))
+                                return false;
+
                             break;
 
                         default:
@@ -209,9 +220,20 @@ namespace TechnitiumLibrary.Net.Dns
                 if (!uint.TryParse(strTtl, out uint number))
                     return false;
 
-                ttl += number;
+                if (!TryAddTtl(ref ttl, number, 1))
+                    return false;
             }
 
+            return true;
+        }
+
+        static bool TryAddTtl(ref uint ttl, uint number, uint unitSeconds)
+        {
+            ulong sum = (ulong)ttl + ((ulong)number * unitSeconds);
+            if (sum > uint.MaxValue)
+                return false;
+
+            ttl = (uint)sum;
             return true;
         }
 
@@ -275,11 +297,20 @@ namespace TechnitiumLibrary.Net.Dns
                 return _originDomain;
             }
 
-            if (domain.EndsWith('.'))
-                return domain.Substring(0, domain.Length - 1);
+            bool absolute = EndsWithUnescapedDot(domain);
+            if (absolute)
+                domain = domain.Substring(0, domain.Length - 1);
+
+            domain = UnescapeDomainName(domain);
+
+            if (absolute)
+                return domain;
 
             if (_originDomain is null)
                 throw new FormatException("The zone file parser failed to parse 'domain-name' field on line # " + _lineNo + ".");
+
+            if (domain.Length == 0)
+                return _originDomain;
 
             return domain + "." + _originDomain;
         }
@@ -501,6 +532,7 @@ namespace TechnitiumLibrary.Net.Dns
                     if (!TryParseTtl(await PopItemAsync(), out _defaultTtl))
                         throw new FormatException("The zone file parser failed to parse $TTL 'default-ttl' field on line # " + _lineNo + ".");
 
+                    _defaultTtlSpecified = true;
                     continue;
                 }
 
@@ -520,16 +552,24 @@ namespace TechnitiumLibrary.Net.Dns
 
                     domain = _originDomain;
                 }
-                else if (domain.EndsWith('.'))
-                {
-                    domain = domain.Substring(0, domain.Length - 1);
-                }
                 else
                 {
-                    if (_originDomain is null)
-                        throw new FormatException("The zone file parser failed to parse 'domain-name' field on line # " + _lineNo + ".");
+                    bool absolute = EndsWithUnescapedDot(domain);
+                    if (absolute)
+                        domain = domain.Substring(0, domain.Length - 1);
 
-                    domain += "." + _originDomain;
+                    domain = UnescapeDomainName(domain);
+
+                    if (!absolute)
+                    {
+                        if (_originDomain is null)
+                            throw new FormatException("The zone file parser failed to parse 'domain-name' field on line # " + _lineNo + ".");
+
+                        if (domain.Length == 0)
+                            domain = _originDomain;
+                        else
+                            domain += "." + _originDomain;
+                    }
                 }
 
                 if (!DnsClient.IsDomainNameValid(domain))
@@ -579,7 +619,7 @@ namespace TechnitiumLibrary.Net.Dns
 
                 if (!ttlRead)
                 {
-                    if (_defaultTtl > 0)
+                    if (_defaultTtlSpecified || (_defaultTtl > 0))
                         ttl = _defaultTtl;
                     else
                         ttl = lastTtl;
@@ -758,6 +798,63 @@ namespace TechnitiumLibrary.Net.Dns
             }
 
             return octets;
+        }
+
+        static bool EndsWithUnescapedDot(string domain)
+        {
+            if ((domain.Length == 0) || (domain[domain.Length - 1] != '.'))
+                return false;
+
+            int slashes = 0;
+
+            for (int i = domain.Length - 2; (i >= 0) && (domain[i] == '\\'); i--)
+                slashes++;
+
+            return (slashes % 2) == 0;
+        }
+
+        internal static string UnescapeDomainName(string value)
+        {
+            StringBuilder result = new StringBuilder(value.Length);
+
+            for (int i = 0; i < value.Length; i++)
+            {
+                if (value[i] != '\\')
+                {
+                    result.Append(value[i]);
+                    continue;
+                }
+
+                if (i + 1 >= value.Length)
+                    throw new FormatException("Zone file escape is missing the escaped character.");
+
+                if ((value[i + 1] >= '0') && (value[i + 1] <= '9'))
+                {
+                    if ((i + 3 >= value.Length) || (value[i + 2] < '0') || (value[i + 2] > '9') || (value[i + 3] < '0') || (value[i + 3] > '9'))
+                        throw new FormatException("Zone file decimal escape must be three digits.");
+
+                    int octet = ((value[i + 1] - '0') * 100) + ((value[i + 2] - '0') * 10) + (value[i + 3] - '0');
+                    if (octet > 255)
+                        throw new FormatException("Zone file escape is outside the octet range: \\" + octet.ToString());
+
+                    if (octet == '.')
+                        result.Append(@"\.");
+                    else
+                        result.Append((char)octet);
+
+                    i += 3;
+                    continue;
+                }
+
+                if (value[i + 1] == '.')
+                    result.Append(@"\.");
+                else
+                    result.Append(value[i + 1]);
+
+                i++;
+            }
+
+            return result.ToString();
         }
 
         internal static string UnescapeCharacterString(string value)
