@@ -200,7 +200,7 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
             _type = (DnsResourceRecordType)DnsDatagram.ReadUInt16NetworkOrder(s);
             _class = (DnsClass)DnsDatagram.ReadUInt16NetworkOrder(s);
             _ttl = DnsDatagram.ReadUInt32NetworkOrder(s);
-            _rData = ReadRecordDataFrom(s, _type);
+            _rData = ReadRecordDataFrom(s, _type, _class);
         }
 
         #endregion
@@ -321,6 +321,23 @@ namespace TechnitiumLibrary.Net.Dns.ResourceRecords
 
         private static DnsResourceRecordData ReadRecordDataFrom(Stream s, DnsResourceRecordType type)
         {
+            return ReadRecordDataFrom(s, type, DnsClass.IN);
+        }
+
+        private static DnsResourceRecordData ReadRecordDataFrom(Stream s, DnsResourceRecordType type, DnsClass @class)
+        {
+            //RFC 2136 section 2.5: class ANY and class NONE carry empty RDATA for prerequisites and RRset deletion.
+            if (((@class == DnsClass.ANY) || (@class == DnsClass.NONE)) && s.CanSeek)
+            {
+                long position = s.Position;
+                ushort rdLength = DnsDatagram.ReadUInt16NetworkOrder(s);
+
+                if (rdLength == 0)
+                    return new DnsUnknownRecordData(Array.Empty<byte>());
+
+                s.Position = position;
+            }
+
             switch (type)
             {
                 case DnsResourceRecordType.A:
