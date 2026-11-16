@@ -59,21 +59,23 @@ namespace TechnitiumLibrary
 
             for (int i = 0; i < _maximumConcurrencyLevel; i++)
             {
-                _ = Task.Factory.StartNew(delegate ()
+                // A queued task awaits, and that continuation is posted back to this scheduler. The worker has to
+                // release the scheduler thread while it waits; blocking it with GetResult leaves no thread to resume the task.
+                _ = Task.Factory.StartNew(async delegate ()
                 {
-                    while (channelReader.WaitToReadAsync().AsTask().GetAwaiter().GetResult())
+                    while (await channelReader.WaitToReadAsync())
                     {
                         while (channelReader.TryRead(out (Func<object?, Task> task, object? state) item))
                         {
                             try
                             {
-                                item.task(item.state).GetAwaiter().GetResult();
+                                await item.task(item.state);
                             }
                             catch
                             { }
                         }
                     }
-                }, CancellationToken.None, TaskCreationOptions.DenyChildAttach, taskScheduler);
+                }, CancellationToken.None, TaskCreationOptions.DenyChildAttach, taskScheduler).Unwrap();
             }
         }
 
